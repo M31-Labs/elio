@@ -1,50 +1,58 @@
 # Elio
 
-**Render-coupled compute for the GoSX engine.** Elio is the third tier of the
-GPU language triad — **Selena** shades (presentation / raster), **Elio**
-computes per-frame (simulation, culling, geometry, screen-space, procedural:
-buffers → buffers that feed the draw), **Manta** infers (neural graphics).
+Elio is a compiler for GPU compute shaders. You write a compute kernel once in a
+small language (`.elio`), and Elio emits the equivalent shader for several
+graphics APIs — WGSL (WebGPU), GLSL (Vulkan / GLES 3.1), and Metal (MSL) — plus
+a CPU implementation for platforms that have no compute support at all. It is
+built for the GoSX renderer, but the core compiler has no GoSX dependency.
 
-Named for the sun (Helios) to Selena's moon (Selene): Selena makes the light
-behave; Elio drives the per-frame work that feeds it.
+## What problem it solves
 
-## Why
+A GPU compute kernel — culling, particle integration, a prefix sum, skinning —
+has to be written separately for each graphics API: WGSL for WebGPU, GLSL for
+Vulkan and GLES 3.1, MSL for Metal. WebGL and GLES 2.0 have no compute stage at
+all, so the same work has to be re-implemented on the CPU there. In GoSX this
+showed up concretely: the particle integrator existed in four hand-written
+copies (WebGPU/Go, WebGL/JS, Android/Kotlin, iOS/Swift), and there was no
+portable path for culling, post-processing, or simulation.
 
-GoSX's renderer had a scene graph and a presentation pipeline but no portable
-render-coupled compute: the particle integrator was hand-written in four places
-(WebGPU-Go, WebGL-JS, Android-Kotlin, iOS-Swift), mobile had no GPU compute, and
-there was no GPU-driven rendering, portable post-FX, or simulation. Elio is that
-tier — author a compute kernel once, emit every backend (plus a CPU fallback for
-surfaces with no compute), and let the GoSX frame schedule it.
+Elio replaces those copies with one source. The same kernel is checked to be
+valid on each backend: WGSL is validated with `naga`, GLSL is compiled to SPIR-V
+with `glslangValidator`, and the CPU implementation is run and its results
+compared — see `conformance/`.
+
+It is one of three related M31 Labs compilers: Selena compiles material/shader
+source for the rasterization pipeline, Manta compiles ML inference, and Elio
+compiles per-frame compute. They are separate tools that share the same parser
+tooling and target the same GPU device.
 
 ## Pipeline
 
 ```
-.elio source ──parse──▶ IR ──┬──▶ WGSL    (WebGPU; validated by naga)
-                             ├──▶ GLSL     (Vulkan / GLES 3.1; glslang → SPIR-V)
-                             ├──▶ Metal     (MSL)
-                             └──▶ CPU       (scalar interpreter; the WebGL/GLES2 floor)
+.elio source ──parse──▶ IR ──┬──▶ WGSL   (WebGPU; validated by naga)
+                             ├──▶ GLSL    (Vulkan / GLES 3.1; glslang → SPIR-V)
+                             ├──▶ Metal    (MSL)
+                             └──▶ CPU      (scalar interpreter; WebGL / GLES 2.0)
 ```
-
-One source, four backends. The same kernel is **naga-validated** as WGSL,
-**glslang-compiled to SPIR-V** as GLSL, emitted as MSL, and **executed** by the
-CPU interpreter — cross-checked in `conformance/`.
 
 ## CLI
 
 ```sh
 go install m31labs.dev/elio/cmd/elio@latest
 
-elio emit wgsl  material.elio    # → WGSL to stdout
-elio emit glsl  material.elio    # → GLSL #version 450 compute
-elio emit metal material.elio    # → Metal MSL
-elio check       material.elio   # parse-check
+elio emit wgsl  kernel.elio    # WGSL to stdout
+elio emit glsl  kernel.elio    # GLSL #version 450 compute
+elio emit metal kernel.elio    # Metal MSL
+elio check      kernel.elio    # parse-check only
 ```
 
 ## The `.elio` language
 
-Go-flavored types avoid the `<…>` ambiguity of WGSL generics: `[N]T` / `[]T`
-arrays, `atomic_u32`, `vec2/3/4[u]`, `mat3`/`mat4`.
+Types are spelled in a Go-flavored way to avoid the `<…>` ambiguity of WGSL
+generics: `[N]T` and `[]T` for fixed and runtime arrays, `atomic_u32`,
+`vec2/3/4` (suffix `u` for unsigned), `mat3` / `mat4`. Bindings, a workgroup
+size, and a kernel entry point are declared at the top level; the body is
+ordinary imperative code (`let` / `var`, `if`, `for`, indexing, atomics).
 
 ```elio
 @group(0) @binding(0) uniform cull: CullUniforms;
@@ -69,35 +77,42 @@ arrays, `atomic_u32`, `vec2/3/4[u]`, `mat3`/`mat4`.
 }
 ```
 
-## How it plugs into GoSX
+## How it integrates with GoSX
 
-Elio targets GoSX's `render/gpu` package as the single device of record and
-plugs into the renderer through `render/compute.ExternalComputePass`: a pass
-records its dispatch onto the frame's command encoder and **publishes** its
-output buffers onto the **GPU Resource Bus** (`render/compute.GPUResource`),
-which the draw consumes. The canonical `InstanceRecord` layout (80 B = mat4 +
-vec4&lt;u32&gt;) maps 1:1 to the engine's instanced-draw path, so an Elio
-kernel's output binds with no renderer change. (`examples/cull` is a working
-out-of-tree pass whose shader is generated by this compiler.)
+Elio targets GoSX's `render/gpu` package rather than a GPU API directly, and
+attaches to the renderer through `render/compute.ExternalComputePass`. A pass
+records its dispatch onto the frame's command encoder and publishes the buffers
+it produced onto a small resource descriptor (`render/compute.GPUResource`); the
+renderer's draw step then reads those buffers. The `InstanceRecord` layout
+(80 bytes: a `mat4` plus a `vec4<u32>`) matches the engine's existing instanced
+draw, so a kernel that writes instance records can drive a draw without changes
+to the renderer. `examples/cull` is a working out-of-tree pass whose shader is
+generated by this compiler.
 
 ## Layout
 
 | Path | Role |
 |---|---|
-| `ir/` | imperative compute IR (the heart) + sample kernels |
+| `ir/` | the compute IR and sample kernels |
 | `parse/` | `.elio` front-end (lexer + recursive-descent parser) |
 | `emit/wgsl/`, `emit/glsl/`, `emit/metal/` | backend emitters |
-| `run/` | scalar CPU interpreter / fallback |
+| `run/` | scalar CPU interpreter |
 | `conformance/` | cross-backend validation (naga + glslang + CPU) |
 | `cmd/elio/` | the `elio` CLI |
-| `examples/cull/` | out-of-tree GoSX `ExternalComputePass` |
+| `examples/cull/` | an out-of-tree GoSX `ExternalComputePass` |
 
-Knowledge space: `hypha://m31labs/elio`.
+## Status and roadmap
 
-## Roadmap
+The compiler is working end to end: parsing, four backends, the CLI, and the
+GoSX integration point are in place and tested. Planned work:
 
-- Migrate the front-end to a `grammargen`/`gotreesitter` grammar (the house
-  style shared with Selena and Manta); the hand-written parser bootstraps it.
-- SPIR-V is reached today via GLSL → glslang; a direct emitter is optional.
-- Wire Manta in-frame on the shared WebGPU device (the device-injection seam
-  exists on both sides; real dispatch is the next layer).
+- Replace the hand-written parser with a `grammargen` / `gotreesitter` grammar,
+  the same parser tooling Selena and Manta use. The current parser is a working
+  bootstrap.
+- A direct SPIR-V emitter is optional; SPIR-V is reachable today through the
+  GLSL backend and `glslang`.
+- Run Elio kernels in the GoSX frame on a WebGPU device shared with Manta. The
+  device-sharing interfaces exist on both sides; the dispatch path is the next
+  step.
+
+The name is a counterpart to Selena (the rasterization-side compiler).
