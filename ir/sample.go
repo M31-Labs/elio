@@ -66,3 +66,42 @@ func CullKernel() *Module {
 		}},
 	}
 }
+
+// ScaleBias returns a second, structurally different kernel —
+// dst[i] = src[i] * params.scale + params.bias over vec4 buffers — to prove the
+// IR, emitters, and CPU interpreter generalize beyond cull. It exercises vector
+// arithmetic (vec*vec, vec+vec) and a uniform struct of vectors, neither of
+// which the cull kernel uses.
+func ScaleBias() *Module {
+	return &Module{
+		Structs: []Struct{
+			{Name: "Params", Fields: []Field{
+				{"scale", Vec{4, F32}},
+				{"bias", Vec{4, F32}},
+			}},
+		},
+		Bindings: []Binding{
+			{Group: 0, Binding: 0, Space: Uniform, Name: "params", Type: Named{"Params"}},
+			{Group: 0, Binding: 1, Space: Storage, Access: Read, Name: "src", Type: Array{Elem: Vec{4, F32}}},
+			{Group: 0, Binding: 2, Space: Storage, Access: ReadWrite, Name: "dst", Type: Array{Elem: Vec{4, F32}}},
+		},
+		Kernels: []Kernel{{
+			Name:          "main",
+			WorkgroupSize: [3]int{64, 1, 1},
+			Builtins:      []Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: Vec{3, U32}}},
+			Body: []Stmt{
+				Let{"i", Member{Name{"gid"}, "x"}},
+				If{
+					Cond: Binary{">=", Name{"i"}, Call{"arrayLength", []Expr{AddrOf{Name{"src"}}}}},
+					Then: []Stmt{Return{}},
+				},
+				Assign{
+					Target: Index{Name{"dst"}, Name{"i"}},
+					Value: Binary{"+",
+						Binary{"*", Index{Name{"src"}, Name{"i"}}, Member{Name{"params"}, "scale"}},
+						Member{Name{"params"}, "bias"}},
+				},
+			},
+		}},
+	}
+}

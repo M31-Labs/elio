@@ -431,6 +431,9 @@ func litValue(t string) any {
 }
 
 func binop(op string, l, r any) (any, error) {
+	if isVec(l) || isVec(r) {
+		return vecBinop(op, l, r)
+	}
 	a, b := toFloat(l), toFloat(r)
 	switch op {
 	case "+":
@@ -455,6 +458,49 @@ func binop(op string, l, r any) (any, error) {
 		return a != b, nil
 	}
 	return nil, fmt.Errorf("run: unsupported binary operator %q", op)
+}
+
+func isVec(v any) bool { _, ok := v.([]float64); return ok }
+
+// vecBinop applies an arithmetic operator component-wise, broadcasting a scalar
+// operand across the vector (vec*vec, vec+vec, vec*scalar, scalar*vec).
+func vecBinop(op string, l, r any) (any, error) {
+	lv, lvec := l.([]float64)
+	rv, rvec := r.([]float64)
+	n := 0
+	if lvec {
+		n = len(lv)
+	}
+	if rvec {
+		if lvec && len(rv) != n {
+			return nil, fmt.Errorf("run: vector size mismatch %d vs %d", len(lv), len(rv))
+		}
+		n = len(rv)
+	}
+	ls, rs := toFloat(l), toFloat(r)
+	out := make([]float64, n)
+	for i := 0; i < n; i++ {
+		a, b := ls, rs
+		if lvec {
+			a = lv[i]
+		}
+		if rvec {
+			b = rv[i]
+		}
+		switch op {
+		case "+":
+			out[i] = a + b
+		case "-":
+			out[i] = a - b
+		case "*":
+			out[i] = a * b
+		case "/":
+			out[i] = a / b
+		default:
+			return nil, fmt.Errorf("run: operator %q not defined on vectors", op)
+		}
+	}
+	return out, nil
 }
 
 func toFloat(v any) float64 {
