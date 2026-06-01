@@ -77,7 +77,9 @@ func validate(t *testing.T, bin, fname, src string, args func(string) []string) 
 	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(path, args(f)...).CombinedOutput()
+	cmd := exec.Command(path, args(f)...)
+	cmd.Dir = dir // contain any default output (e.g. glslang's comp.spv) to the tempdir
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s validation failed: %v\n%s\n--- source ---\n%s", bin, err, out, src)
 	}
