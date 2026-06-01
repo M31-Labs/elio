@@ -1,0 +1,32 @@
+struct CullUniforms {
+  planes: [6]vec4;
+  vertexCount: u32;
+  radius: f32;
+  _pad0: vec2;
+}
+
+struct InstanceRecord {
+  model: mat4;
+  pickData: vec4u;
+}
+
+@group(0) @binding(0) uniform cull: CullUniforms;
+@group(0) @binding(1) storage read input: []InstanceRecord;
+@group(0) @binding(2) storage read_write output: []InstanceRecord;
+@group(0) @binding(3) storage read_write drawArgs: [4]atomic_u32;
+
+@workgroup(64) kernel main(gid: global_invocation_id) {
+  let i = gid.x;
+  if i >= arrayLength(&input) { return; }
+  let record = input[i];
+  let center = record.model[3].xyz;
+  var inside = true;
+  for (var p: i32 = 0; p < 6; p = p + 1) {
+    let plane = cull.planes[p];
+    if dot(plane.xyz, center) + plane.w < -cull.radius { inside = false; break; }
+  }
+  if inside {
+    let slot = atomicAdd(&drawArgs[1], 1u);
+    output[slot] = record;
+  }
+}
