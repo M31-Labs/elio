@@ -139,7 +139,7 @@ func ElioGrammar() *grammargen.Grammar {
 			field("operator", choice(s("+"), s("-"))),
 			field("right", sym("expression")))),
 		grammargen.PrecLeft(2, seq(field("left", sym("expression")),
-			field("operator", choice(s("*"), s("/"))),
+			field("operator", choice(s("*"), s("/"), s("%"))),
 			field("right", sym("expression")))),
 	))
 

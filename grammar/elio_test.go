@@ -42,6 +42,7 @@ func TestOutermostIndexParses(t *testing.T) {
 		K("let c = record.model[3].xyz;"),// member-index-member chain
 		K("let r = input[i] + a;"),       // index not outermost (always worked)
 		K("let u = -a[b];"),              // unary over index
+		K("let m = gid.x % 8u;"),         // modulo (tiling / index wrap)
 		K("let s = atomicAdd(&drawArgs[1], 1u);"), // index inside call arg with addr-of
 	}
 	for _, src := range mustParse {

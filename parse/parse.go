@@ -92,7 +92,7 @@ func lex(src string) ([]token, error) {
 					continue
 				}
 			}
-			if strings.IndexByte("{}()[]<>:;,.@&=+-*/!", c) >= 0 {
+			if strings.IndexByte("{}()[]<>:;,.@&=+-*/%!", c) >= 0 {
 				emit(tPunct, string(c))
 				i++
 			} else {
@@ -668,7 +668,7 @@ func (p *parser) multiplicative() (ir.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.isPunct("*") || p.isPunct("/") {
+	for p.isPunct("*") || p.isPunct("/") || p.isPunct("%") {
 		op := p.next().val
 		right, err := p.unary()
 		if err != nil {
