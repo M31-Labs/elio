@@ -118,8 +118,9 @@ func weightedInfluence(comp string) (Stmt, Expr) {
 // assumed non-zero, so it seeds the accumulators and defines the antipodality
 // reference quaternion `ref`.
 func SkinDQS() *Module {
-	// ref = realQ[j.x]: the antipodality reference (influence 0's real quat).
-	ref := Index{Name{"realQ"}, Member{Name{"j"}, "x"}}
+	// refQ = realQ[j.x]: the antipodality reference (influence 0's real quat).
+	// Named refQ (not ref) because `ref` is a reserved keyword in WGSL.
+	refQ := Index{Name{"realQ"}, Member{Name{"j"}, "x"}}
 
 	// Seed the accumulators from influence 0 (component x) — no flip needed since
 	// dot(ref, ref) >= 0. Initializing from the first influence avoids needing a
@@ -133,7 +134,7 @@ func SkinDQS() *Module {
 		Let{"p", Index{Name{"restPos"}, Name{"i"}}},
 		Let{"j", Index{Name{"joints"}, Name{"i"}}},
 		Let{"w", Index{Name{"weights"}, Name{"i"}}},
-		Let{"ref", ref},
+		Let{"refQ", refQ},
 		Var{Name: "accReal", Type: Vec{4, F32}, Init: Binary{"*", Index{Name{"realQ"}, Member{Name{"j"}, "x"}}, Member{Name{"w"}, "x"}}},
 		Var{Name: "accDual", Type: Vec{4, F32}, Init: Binary{"*", Index{Name{"dualQ"}, Member{Name{"j"}, "x"}}, Member{Name{"w"}, "x"}}},
 		Var{Name: "scaleAcc", Type: Vec{4, F32}, Init: Binary{"*", Index{Name{"boneScale"}, Member{Name{"j"}, "x"}}, Member{Name{"w"}, "x"}}},
@@ -155,7 +156,7 @@ func SkinDQS() *Module {
 			Let{sc, Index{Name{"boneScale"}, Name{bc}}},
 			Var{Name: wq, Type: F32, Init: Member{Name{"w"}, comp}},
 			If{
-				Cond: Binary{"<", Call{"dot", []Expr{Name{rc}, Name{"ref"}}}, Lit{"0.0"}},
+				Cond: Binary{"<", Call{"dot", []Expr{Name{rc}, Name{"refQ"}}}, Lit{"0.0"}},
 				Then: []Stmt{Assign{Target: Name{wq}, Value: Unary{"-", Member{Name{"w"}, comp}}}},
 			},
 			Assign{Target: Name{"accReal"}, Value: Binary{"+", Name{"accReal"}, Binary{"*", Name{rc}, Name{wq}}}},
