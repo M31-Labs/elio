@@ -12,7 +12,14 @@ package ir
 //	binding 3  palette  array<vec4<f32>>  read        bone matrices, COLUMN-MAJOR:
 //	                                                   bone j's four columns live at
 //	                                                   palette[j*4+0 .. j*4+3]
-//	binding 4  outPos   array<vec4<f32>>  read_write  skinned position
+//	binding 4  outPos   array<vec4<f32>>  read_write  skinned position; .w =
+//	                                                   Σ(weights·col3.w·p.w)
+//	                                                   (==1 for normalized affine
+//	                                                   rigs), not a passthrough
+//
+// Joint indices are TRUSTED: out-of-range indices are undefined behavior (GPU) /
+// out-of-bounds (CPU). The caller must supply valid bone indices; only the vertex
+// dimension is bounds-checked (via arrayLength).
 //
 // Storing the palette column-major is what lets the kernel stay inside Elio's
 // current op set: a matrix·point product M·p is just
