@@ -214,6 +214,27 @@ func TestSortEmits(t *testing.T) {
 	}
 }
 
+// TestParticleUpdateEmits validates the particle-simulation kernel — a uniform
+// struct, a read_write storage array of structs, struct-field reads and writes
+// (particles[i].px = …), and branching — across the GPU backends. Execution
+// (integration + respawn) is proven in stdlib.
+func TestParticleUpdateEmits(t *testing.T) {
+	mod := stdlib.ParticleUpdate()
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	validate(t, "naga", "particles.wgsl", wsrc, func(f string) []string { return []string{f} })
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	validate(t, "glslangValidator", "particles.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	if _, err := metal.Emit(mod); err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+}
+
 func validate(t *testing.T, bin, fname, src string, args func(string) []string) {
 	t.Helper()
 	path, err := exec.LookPath(bin)

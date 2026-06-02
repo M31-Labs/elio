@@ -376,6 +376,18 @@ func (ev *evaluator) assign(target ir.Expr, v any) error {
 			return fmt.Errorf("run: cannot index-assign into %T", base)
 		}
 		return nil
+	case ir.Member:
+		// e.g. particles[i].pos = …  — resolve the struct and set its field.
+		base, err := ev.eval(t.E)
+		if err != nil {
+			return err
+		}
+		m, ok := base.(map[string]any)
+		if !ok {
+			return fmt.Errorf("run: cannot assign to .%s of %T", t.Field, base)
+		}
+		m[t.Field] = v
+		return nil
 	}
 	return fmt.Errorf("run: unsupported assign target %T", target)
 }
