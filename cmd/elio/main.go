@@ -57,7 +57,9 @@ func parseFile(path string) (*ir.Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parse.Parse(string(src))
+	// House-style front-end: the grammargen/gotreesitter grammar (shared with
+	// Selena and Manta). The hand-written parser remains the test oracle.
+	return parse.ParseTree(string(src))
 }
 
 func emit(target, path string, stdout, stderr io.Writer) int {
