@@ -87,3 +87,66 @@ func TestRunSkinLBS(t *testing.T) {
 		}
 	}
 }
+
+// TestRunSkinLBSRotation exercises the kernel's headline feature — column-major
+// handling of the ROTATION columns (col0/col1/col2) — which the translation-only
+// rig in TestRunSkinLBS never touches. The bone is a 90° rotation about +Z stored
+// column-major:
+//
+//	col0 = {0,1,0,0}  col1 = {-1,0,0,0}  col2 = {0,0,1,0}  col3 = {0,0,0,1}
+//
+// For rest vertex p = (1,2,3,1) at full weight, M·p is
+//
+//	col0*p.x + col1*p.y + col2*p.z + col3*p.w
+//	= {0,1,0,0}*1 + {-1,0,0,0}*2 + {0,0,1,0}*3 + {0,0,0,1}*1
+//	= {-2, 1, 3, 1}
+//
+// i.e. (x,y,z) -> (-p.y, p.x, p.z) = (-2, 1, 3). This pins down that transform
+// maps p.x->col0, p.y->col1, p.z->col2: a transposed or dropped column would
+// fail here even though the translation-only test still passes.
+func TestRunSkinLBSRotation(t *testing.T) {
+	mod := ir.SkinLBS()
+
+	palette := []any{
+		// bone0: 90° rotation about +Z (column-major)
+		[]float64{0, 1, 0, 0},  // col0
+		[]float64{-1, 0, 0, 0}, // col1
+		[]float64{0, 0, 1, 0},  // col2
+		[]float64{0, 0, 0, 1},  // col3
+	}
+
+	restPos := []any{
+		[]float64{1, 2, 3, 1},
+	}
+	joints := []any{
+		[]float64{0, 0, 0, 0}, // v0: bone0 only
+	}
+	weights := []any{
+		[]float64{1, 0, 0, 0}, // full weight on bone0
+	}
+	outPos := []any{nil}
+
+	mem := &Memory{Vars: map[string]any{
+		"restPos": restPos,
+		"joints":  joints,
+		"weights": weights,
+		"palette": palette,
+		"outPos":  outPos,
+	}}
+
+	if err := Run(mod, "main", len(restPos), mem); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	want := [3]float64{-2, 1, 3} // x = -p.y, y = p.x, z = p.z
+	got, ok := outPos[0].([]float64)
+	if !ok || len(got) < 3 {
+		t.Fatalf("outPos[0] = %v, want a vec4", outPos[0])
+	}
+	for c := 0; c < 3; c++ {
+		if abs(got[c]-want[c]) > 1e-9 {
+			t.Fatalf("outPos[0] = (%g,%g,%g), want (%g,%g,%g)",
+				got[0], got[1], got[2], want[0], want[1], want[2])
+		}
+	}
+}
