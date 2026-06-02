@@ -107,7 +107,7 @@ func weightedInfluence(comp string) (Stmt, Expr) {
 //	binding 3  realQ      array<vec4<f32>>  read        per-bone real quaternion (xyzw),
 //	                                                     indexed DIRECTLY by bone index
 //	binding 4  dualQ      array<vec4<f32>>  read        per-bone dual quaternion (xyzw)
-//	binding 5  boneScale  array<vec4<f32>>  read        per-bone uniform scale in .x..z
+//	binding 5  boneScale  array<vec4<f32>>  read        per-bone scale, applied per-axis from .xyz
 //	binding 6  dst        array<vec4<f32>>  read_write  skinned position; .w == 1
 //
 // The palette is pre-built (real/dual quats per bone) by the host, so the kernel
@@ -116,7 +116,13 @@ func weightedInfluence(comp string) (Stmt, Expr) {
 // to write dst[i].{x,y,z,w}. Bone arrays are indexed by the bone index directly
 // (NOT ×4 as LBS's column-major matrix palette is). Influence 0's weight is
 // assumed non-zero, so it seeds the accumulators and defines the antipodality
-// reference quaternion `ref`.
+// reference quaternion `refQ`.
+//
+// Scale is applied PER-AXIS (componentwise base = p * scaleAcc/wsum), matching
+// the kiln-core ApplySkin DQS oracle. The in-elio CPU test uses uniform scale=1;
+// non-uniform numerical coverage lands in the Phase-3c-3 kiln cross-conformance
+// against the per-axis oracle. (`base.w` is computed but unused — only xyz feed
+// the rigid transform.)
 func SkinDQS() *Module {
 	// refQ = realQ[j.x]: the antipodality reference (influence 0's real quat).
 	// Named refQ (not ref) because `ref` is a reserved keyword in WGSL.
@@ -142,6 +148,8 @@ func SkinDQS() *Module {
 	}
 
 	// Accumulate influences 1..3 (components y, z, w) with antipodality flip.
+	// NOTE: the generated identifier suffix is the loop ordinal n (0,1,2 for
+	// comp y,z,w) — it is NOT the influence index (influence 0 is seeded above).
 	for n, comp := range []string{"y", "z", "w"} {
 		s := strconv.Itoa(n)
 		bc := "bc" + s
