@@ -294,6 +294,26 @@ func (ev *evaluator) execStmt(s ir.Stmt) (flow, error) {
 				}
 			}
 		}
+	case ir.While:
+		for {
+			c, err := ev.eval(x.Cond)
+			if err != nil {
+				return flowNormal, err
+			}
+			if !toBool(c) {
+				break
+			}
+			f, err := ev.execBlock(x.Body)
+			if err != nil {
+				return flowNormal, err
+			}
+			if f == flowReturn {
+				return flowReturn, nil
+			}
+			if f == flowBreak {
+				break
+			}
+		}
 	default:
 		return flowNormal, fmt.Errorf("run: unsupported statement %T", s)
 	}

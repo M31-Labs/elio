@@ -135,3 +135,34 @@ func TestRunCompoundAssign(t *testing.T) {
 		t.Errorf("acc[0] = %v, want 30", acc[0])
 	}
 }
+
+// TestRunWhile executes a while loop summing 0..9 = 45, exercising the loop
+// condition, compound assignment, and break-free termination.
+func TestRunWhile(t *testing.T) {
+	mod := &ir.Module{
+		Bindings: []ir.Binding{{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.ReadWrite, Name: "acc", Type: ir.Array{Elem: ir.U32}}},
+		Kernels: []ir.Kernel{{
+			Name: "main", WorkgroupSize: [3]int{1, 1, 1},
+			Builtins: []ir.Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+			Body: []ir.Stmt{
+				ir.Var{Name: "i", Type: ir.U32, Init: ir.Lit{Text: "0u"}},
+				ir.Var{Name: "sum", Type: ir.U32, Init: ir.Lit{Text: "0u"}},
+				ir.While{
+					Cond: ir.Binary{Op: "<", L: ir.Name{Name: "i"}, R: ir.Lit{Text: "10u"}},
+					Body: []ir.Stmt{
+						ir.Assign{Target: ir.Name{Name: "sum"}, Op: "+", Value: ir.Name{Name: "i"}},
+						ir.Assign{Target: ir.Name{Name: "i"}, Op: "+", Value: ir.Lit{Text: "1u"}},
+					},
+				},
+				ir.Assign{Target: ir.Index{E: ir.Name{Name: "acc"}, Idx: ir.Member{E: ir.Name{Name: "gid"}, Field: "x"}}, Value: ir.Name{Name: "sum"}},
+			},
+		}},
+	}
+	acc := []float64{0}
+	if err := Run(mod, "main", 1, &Memory{Vars: map[string]any{"acc": acc}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if acc[0] != 45 {
+		t.Errorf("acc[0] = %v, want 45 (0+1+…+9)", acc[0])
+	}
+}

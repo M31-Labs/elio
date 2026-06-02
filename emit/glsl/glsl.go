@@ -225,6 +225,12 @@ func (e *emitter) stmt(s ir.Stmt, depth int) error {
 			return err
 		}
 		fmt.Fprintf(&e.b, "%s}\n", pad)
+	case ir.While:
+		fmt.Fprintf(&e.b, "%swhile (%s) {\n", pad, e.expr(x.Cond))
+		if err := e.block(x.Body, depth+1); err != nil {
+			return err
+		}
+		fmt.Fprintf(&e.b, "%s}\n", pad)
 	default:
 		return fmt.Errorf("glsl: unsupported statement %T", s)
 	}

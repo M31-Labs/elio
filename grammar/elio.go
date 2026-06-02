@@ -92,7 +92,8 @@ func ElioGrammar() *grammargen.Grammar {
 
 	g.Define("statement", choice(
 		sym("let_stmt"), sym("var_stmt"), sym("return_stmt"),
-		sym("break_stmt"), sym("barrier_stmt"), sym("if_stmt"), sym("for_stmt"), sym("assign_stmt"),
+		sym("break_stmt"), sym("barrier_stmt"), sym("if_stmt"),
+		sym("for_stmt"), sym("while_stmt"), sym("assign_stmt"),
 	))
 
 	g.Define("let_stmt", seq(
@@ -117,6 +118,9 @@ func ElioGrammar() *grammargen.Grammar {
 		field("cond", sym("expression")), s(";"),
 		field("post", sym("assign_inner")), s(")"),
 		field("body", sym("block")),
+	))
+	g.Define("while_stmt", seq(
+		s("while"), field("cond", sym("expression")), field("body", sym("block")),
 	))
 	g.Define("assign_stmt", seq(sym("assign_inner"), s(";")))
 	g.Define("assign_inner", seq(

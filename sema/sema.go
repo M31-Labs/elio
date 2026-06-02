@@ -219,6 +219,9 @@ func (c *checker) checkStmt(s *scope, st ir.Stmt) {
 			c.checkStmt(fs, st.Post)
 		}
 		c.checkBlock(fs, st.Body)
+	case ir.While:
+		c.checkExpr(s, st.Cond)
+		c.checkBlock(s, st.Body)
 	case ir.Return, ir.Break, ir.Barrier:
 		// no-op
 	case ir.Do:

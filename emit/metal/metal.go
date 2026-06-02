@@ -222,6 +222,12 @@ func emitStmt(b *strings.Builder, s ir.Stmt, depth int) error {
 			return err
 		}
 		fmt.Fprintf(b, "%s}\n", pad)
+	case ir.While:
+		fmt.Fprintf(b, "%swhile (%s) {\n", pad, expr(x.Cond))
+		if err := emitBlock(b, x.Body, depth+1); err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "%s}\n", pad)
 	default:
 		return fmt.Errorf("metal: unsupported statement %T", s)
 	}

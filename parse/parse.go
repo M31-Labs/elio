@@ -508,6 +508,8 @@ func (p *parser) stmt() (ir.Stmt, error) {
 		return p.ifStmt()
 	case p.isIdent("for"):
 		return p.forStmt()
+	case p.isIdent("while"):
+		return p.whileStmt()
 	default:
 		a, err := p.assignNoSemi()
 		if err != nil {
@@ -574,6 +576,19 @@ func (p *parser) assignOp() (string, error) {
 		}
 	}
 	return "", p.errf("expected assignment operator, got %q", t.val)
+}
+
+func (p *parser) whileStmt() (ir.Stmt, error) {
+	p.next() // while
+	cond, err := p.expr()
+	if err != nil {
+		return nil, err
+	}
+	body, err := p.block()
+	if err != nil {
+		return nil, err
+	}
+	return ir.While{Cond: cond, Body: body}, nil
 }
 
 func (p *parser) ifStmt() (ir.Stmt, error) {

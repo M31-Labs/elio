@@ -256,7 +256,7 @@ func (w *treeWalker) block(n *gts.Node) ([]ir.Stmt, error) {
 // `statement` supertype is elided and the concrete node appears directly).
 func (w *treeWalker) maybeStmt(n *gts.Node) (func() (ir.Stmt, error), bool) {
 	switch w.typ(n) {
-	case "let_stmt", "var_stmt", "return_stmt", "break_stmt", "barrier_stmt", "if_stmt", "for_stmt", "assign_stmt":
+	case "let_stmt", "var_stmt", "return_stmt", "break_stmt", "barrier_stmt", "if_stmt", "for_stmt", "while_stmt", "assign_stmt":
 		return func() (ir.Stmt, error) { return w.stmt(n) }, true
 	}
 	return nil, false
@@ -282,6 +282,16 @@ func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
 		return w.ifStmt(n)
 	case "for_stmt":
 		return w.forStmt(n)
+	case "while_stmt":
+		cond, err := w.expr(w.field(n, "cond"))
+		if err != nil {
+			return nil, err
+		}
+		body, err := w.block(w.field(n, "body"))
+		if err != nil {
+			return nil, err
+		}
+		return ir.While{Cond: cond, Body: body}, nil
 	case "assign_stmt":
 		return w.assignInner(n.NamedChild(0))
 	}

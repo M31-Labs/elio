@@ -44,6 +44,7 @@ func TestOutermostIndexParses(t *testing.T) {
 		K("let u = -a[b];"),              // unary over index
 		K("let m = gid.x % 8u;"),         // modulo (tiling / index wrap)
 		K("acc[gid.x] += 1.0;"),          // compound assignment
+		K("while i < n {\n    i += 1u;\n  }"), // while loop
 		K("for (var k: u32 = 0u; k < 4u; k += 1u) {\n    s *= 2.0;\n  }"), // compound in for-post + body
 		K("let s = atomicAdd(&drawArgs[1], 1u);"),                         // index inside call arg with addr-of
 	}

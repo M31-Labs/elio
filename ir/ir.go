@@ -167,6 +167,12 @@ type For struct {
 	Body []Stmt
 }
 
+// While is while (Cond) { Body }.
+type While struct {
+	Cond Expr
+	Body []Stmt
+}
+
 // Return is return;
 type Return struct{}
 
@@ -186,6 +192,7 @@ func (Var) isStmt()     {}
 func (Assign) isStmt()  {}
 func (If) isStmt()      {}
 func (For) isStmt()     {}
+func (While) isStmt()   {}
 func (Return) isStmt()  {}
 func (Break) isStmt()   {}
 func (Do) isStmt()      {}
