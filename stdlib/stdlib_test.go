@@ -15,6 +15,7 @@ func TestPrimitivesAreValid(t *testing.T) {
 	}{
 		{"Scan", sema.Check(Scan())},
 		{"Compact", sema.Check(Compact())},
+		{"Sort", sema.Check(Sort())},
 	} {
 		if len(tc.errs) != 0 {
 			t.Errorf("%s failed sema:\n%v", tc.name, sema.Errors(tc.errs))
@@ -89,6 +90,28 @@ func TestCompactPacksSurvivors(t *testing.T) {
 	for k := 0; k < 32; k++ {
 		if want := float64(k + 1); output[k] != want {
 			t.Fatalf("output[%d] = %v, want %v", k, output[k], want)
+		}
+	}
+}
+
+// TestSortOrdersKeys runs the bitonic sort over a fully-reversed 64-lane tile
+// (63,62,…,0) and asserts an ascending result (0,1,…,63) — the worst case for a
+// sort network, executed lane-by-lane in lockstep.
+func TestSortOrdersKeys(t *testing.T) {
+	const n = 64
+	input := make([]float64, n)
+	for i := range input {
+		input[i] = float64(n - 1 - i) // 63,62,…,1,0
+	}
+	output := make([]float64, n)
+	mem := &run.Memory{Vars: map[string]any{"input": input, "output": output}}
+
+	if err := run.Run(Sort(), "sort", n, mem); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		if output[i] != float64(i) {
+			t.Fatalf("output = %v\nnot ascending at [%d]: %v, want %v", output, i, output[i], float64(i))
 		}
 	}
 }

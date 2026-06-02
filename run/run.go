@@ -134,16 +134,19 @@ func evalConsts(m *ir.Module, mem *Memory) (map[string]any, error) {
 func setBuiltins(ev *evaluator, k *ir.Kernel, gid, total int) {
 	lid := gid % total
 	wid := gid / total
+	// Builtin ids are u32 vectors, so their components are integers — lane-index
+	// arithmetic (e.g. the bitonic sort's t/j, t%2) must divide and modulo as
+	// integers, not floats.
 	for _, bi := range k.Builtins {
 		switch bi.Builtin {
 		case "global_invocation_id":
-			ev.locals[bi.Name] = []float64{float64(gid), 0, 0}
+			ev.locals[bi.Name] = []int64{int64(gid), 0, 0}
 		case "local_invocation_id":
-			ev.locals[bi.Name] = []float64{float64(lid), 0, 0}
+			ev.locals[bi.Name] = []int64{int64(lid), 0, 0}
 		case "workgroup_id":
-			ev.locals[bi.Name] = []float64{float64(wid), 0, 0}
+			ev.locals[bi.Name] = []int64{int64(wid), 0, 0}
 		case "local_invocation_index":
-			ev.locals[bi.Name] = float64(lid)
+			ev.locals[bi.Name] = int64(lid)
 		}
 	}
 }
@@ -549,8 +552,44 @@ func memberValue(base any, field string) (any, error) {
 		return v, nil
 	case []float64:
 		return swizzle(b, field)
+	case []int64:
+		return intSwizzle(b, field)
 	}
 	return nil, fmt.Errorf("run: cannot access .%s on %T", field, base)
+}
+
+// intSwizzle is swizzle for integer vectors (builtin ids): a single component
+// returns an int64; multiple components return an []int64.
+func intSwizzle(v []int64, field string) (any, error) {
+	idx := func(c byte) int {
+		switch c {
+		case 'x', 'r':
+			return 0
+		case 'y', 'g':
+			return 1
+		case 'z', 'b':
+			return 2
+		case 'w', 'a':
+			return 3
+		}
+		return -1
+	}
+	if len(field) == 1 {
+		i := idx(field[0])
+		if i < 0 || i >= len(v) {
+			return nil, fmt.Errorf("run: bad swizzle .%s", field)
+		}
+		return v[i], nil
+	}
+	out := make([]int64, len(field))
+	for k := 0; k < len(field); k++ {
+		i := idx(field[k])
+		if i < 0 || i >= len(v) {
+			return nil, fmt.Errorf("run: bad swizzle .%s", field)
+		}
+		out[k] = v[i]
+	}
+	return out, nil
 }
 
 func swizzle(v []float64, field string) (any, error) {

@@ -82,6 +82,91 @@ func Scan() *ir.Module {
 	}
 }
 
+// Sort returns a workgroup bitonic sort of a 64-lane tile of u32 keys into
+// ascending order. It is the "sort" of the scan/sort/reduce/compact set — the
+// primitive a Gaussian-splat pass needs for back-to-front depth ordering and a
+// transparency pass needs for per-tile fragment sorting.
+//
+// Bitonic sort needs only compare-exchange, so it sidesteps Elio's lack of
+// bitwise operators: the partner index t XOR j (j a power of two) is computed
+// with integer divide/modulo — flipping bit log2(j) of t means +j when that bit
+// is 0 and -j when it is 1. Only the lower lane of each pair writes, and a
+// barrier fences every compare-exchange stage, so it is race-free.
+func Sort() *ir.Module {
+	u := func(s string) ir.Expr { return ir.Lit{Text: s} }
+	nm := func(n string) ir.Expr { return ir.Name{Name: n} }
+	bin := func(op string, l, r ir.Expr) ir.Expr { return ir.Binary{Op: op, L: l, R: r} }
+	dataAt := func(i ir.Expr) ir.Expr { return ir.Index{E: ir.Name{Name: "data"}, Idx: i} }
+	gidx := ir.Member{E: ir.Name{Name: "gid"}, Field: "x"}
+	t, j, k, partner := nm("t"), nm("j"), nm("k"), nm("partner")
+	a, b := nm("a"), nm("b")
+
+	// bit m of x, where divisor = 2^m: (x / divisor) % 2
+	bitSet := func(x, divisor ir.Expr, want string) ir.Expr {
+		return bin("==", bin("%", bin("/", x, divisor), u("2u")), u(want))
+	}
+	// swap newT/newP (so the lower lane takes the larger key)
+	swap := []ir.Stmt{
+		ir.Assign{Target: nm("newT"), Value: b},
+		ir.Assign{Target: nm("newP"), Value: a},
+	}
+
+	return &ir.Module{
+		Bindings: []ir.Binding{
+			{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.Read, Name: "input", Type: ir.Array{Elem: ir.U32}},
+			{Group: 0, Binding: 1, Space: ir.Storage, Access: ir.ReadWrite, Name: "output", Type: ir.Array{Elem: ir.U32}},
+		},
+		Kernels: []ir.Kernel{{
+			Name:          "sort",
+			WorkgroupSize: [3]int{tileWidth, 1, 1},
+			Builtins: []ir.Builtin{
+				{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}},
+				{Name: "lid", Builtin: "local_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}},
+			},
+			Shared: []ir.Shared{{Name: "data", Type: ir.Array{Elem: ir.U32, Len: tileWidth}}},
+			Body: []ir.Stmt{
+				ir.Let{Name: "t", Value: ir.Member{E: ir.Name{Name: "lid"}, Field: "x"}},
+				ir.Assign{Target: dataAt(t), Value: ir.Index{E: ir.Name{Name: "input"}, Idx: gidx}},
+				ir.Barrier{},
+				ir.For{ // k: size of the bitonic sequence being merged
+					Init: ir.Var{Name: "k", Type: ir.U32, Init: u("2u")},
+					Cond: bin("<=", k, u("64u")),
+					Post: ir.Assign{Target: k, Value: bin("*", k, u("2u"))},
+					Body: []ir.Stmt{
+						ir.For{ // j: compare distance, halving
+							Init: ir.Var{Name: "j", Type: ir.U32, Init: bin("/", k, u("2u"))},
+							Cond: bin(">", j, u("0u")),
+							Post: ir.Assign{Target: j, Value: bin("/", j, u("2u"))},
+							Body: []ir.Stmt{
+								// partner = t XOR j  (flip bit log2(j))
+								ir.Var{Name: "partner", Type: ir.U32, Init: bin("+", t, j)},
+								ir.If{Cond: bitSet(t, j, "1u"), Then: []ir.Stmt{ir.Assign{Target: partner, Value: bin("-", t, j)}}},
+								// only the lower lane of each pair compare-exchanges
+								ir.If{Cond: bin(">", partner, t), Then: []ir.Stmt{
+									ir.Let{Name: "a", Value: dataAt(t)},
+									ir.Let{Name: "b", Value: dataAt(partner)},
+									ir.Var{Name: "newT", Type: ir.U32, Init: a},
+									ir.Var{Name: "newP", Type: ir.U32, Init: b},
+									// ascending when bit log2(k) of t is 0, else descending
+									ir.If{
+										Cond: bitSet(t, k, "0u"),
+										Then: []ir.Stmt{ir.If{Cond: bin(">", a, b), Then: swap}},
+										Else: []ir.Stmt{ir.If{Cond: bin("<", a, b), Then: swap}},
+									},
+									ir.Assign{Target: dataAt(t), Value: nm("newT")},
+									ir.Assign{Target: dataAt(partner), Value: nm("newP")},
+								}},
+								ir.Barrier{},
+							},
+						},
+					},
+				},
+				ir.Assign{Target: ir.Index{E: ir.Name{Name: "output"}, Idx: gidx}, Value: dataAt(t)},
+			},
+		}},
+	}
+}
+
 // Compact returns a workgroup stream-compaction: it densely packs the nonzero
 // elements of a 64-lane input tile into output, writing the surviving count to
 // count[0]. It is the scan-driven, atomics-free generalization of the cull

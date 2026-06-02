@@ -84,6 +84,9 @@ func (e *emitter) emit() (string, error) {
 			} else {
 				fmt.Fprintf(&e.b, "shared %s %s;\n", typeName(sh.Type), safe(sh.Name))
 			}
+			// Register the shared variable so type inference resolves indexed
+			// reads (e.g. data[t] : uint) instead of defaulting to float.
+			e.bindings[sh.Name] = sh.Type
 			shared = true
 		}
 	}

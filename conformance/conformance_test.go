@@ -194,6 +194,26 @@ func TestCompactEmits(t *testing.T) {
 	}
 }
 
+// TestSortEmits validates the stdlib bitonic sort. It is the strongest emitter
+// check here: barriers nested inside two loops, which naga's uniformity analysis
+// must accept. Execution correctness is proven in stdlib.
+func TestSortEmits(t *testing.T) {
+	mod := stdlib.Sort()
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	validate(t, "naga", "sort.wgsl", wsrc, func(f string) []string { return []string{f} })
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	validate(t, "glslangValidator", "sort.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	if _, err := metal.Emit(mod); err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+}
+
 func validate(t *testing.T, bin, fname, src string, args func(string) []string) {
 	t.Helper()
 	path, err := exec.LookPath(bin)
