@@ -1,6 +1,7 @@
 package run
 
 import (
+	"math"
 	"testing"
 
 	"m31labs.dev/elio/ir"
@@ -147,6 +148,212 @@ func TestRunSkinLBSRotation(t *testing.T) {
 		if abs(got[c]-want[c]) > 1e-9 {
 			t.Fatalf("outPos[0] = (%g,%g,%g), want (%g,%g,%g)",
 				got[0], got[1], got[2], want[0], want[1], want[2])
+		}
+	}
+}
+
+// --- dual-quaternion helpers (in-test reference oracle) ---
+//
+// Quaternions are xyzw with w the scalar part. These mirror the kiln-core
+// oracle the SkinDQS kernel is built to match: a Hamilton product, conjugate,
+// dual-quat construction, blend (with antipodality), normalize, and point
+// transform — all using the SAME formulas the kernel emits.
+
+// qMul is the Hamilton product a*b (quaternions as xyzw).
+func qMul(a, b [4]float64) [4]float64 {
+	ax, ay, az, aw := a[0], a[1], a[2], a[3]
+	bx, by, bz, bw := b[0], b[1], b[2], b[3]
+	return [4]float64{
+		aw*bx + ax*bw + ay*bz - az*by, // x
+		aw*by - ax*bz + ay*bw + az*bx, // y
+		aw*bz + ax*by - ay*bx + az*bw, // z
+		aw*bw - ax*bx - ay*by - az*bz, // w
+	}
+}
+
+// dualFromRotPos builds the dual part 0.5 * qMul((pos,0), rot) of a unit dual
+// quaternion whose real part is the rotation rot and whose rigid translation is
+// pos.
+func dualFromRotPos(rot [4]float64, pos [3]float64) [4]float64 {
+	t := qMul([4]float64{pos[0], pos[1], pos[2], 0}, rot)
+	return [4]float64{0.5 * t[0], 0.5 * t[1], 0.5 * t[2], 0.5 * t[3]}
+}
+
+// dqsTransform reproduces the kernel's transform of point p under the blended,
+// normalized dual quaternion (r, d) with blended uniform scale sb. It is the
+// independent CPU oracle the kernel's CPU run is checked against.
+func dqsTransform(r, d [4]float64, p, sb [3]float64) [3]float64 {
+	// base = p * sb (componentwise)
+	base := [3]float64{p[0] * sb[0], p[1] * sb[1], p[2] * sb[2]}
+
+	// rotate base by r: uv = cross(r.xyz, base), uuv = cross(r.xyz, uv)
+	rx, ry, rz, rw := r[0], r[1], r[2], r[3]
+	uvx := ry*base[2] - rz*base[1]
+	uvy := rz*base[0] - rx*base[2]
+	uvz := rx*base[1] - ry*base[0]
+	uuvx := ry*uvz - rz*uvy
+	uuvy := rz*uvx - rx*uvz
+	uuvz := rx*uvy - ry*uvx
+	rotx := base[0] + 2*rw*uvx + 2*uuvx
+	roty := base[1] + 2*rw*uvy + 2*uuvy
+	rotz := base[2] + 2*rw*uvz + 2*uuvz
+
+	// translation t = xyz of 2*qMul(d, conj(r))
+	dx, dy, dz, dw := d[0], d[1], d[2], d[3]
+	tx := 2 * (-dw*rx + dx*rw - dy*rz + dz*ry)
+	ty := 2 * (-dw*ry + dx*rz + dy*rw - dz*rx)
+	tz := 2 * (-dw*rz - dx*ry + dy*rx + dz*rw)
+
+	return [3]float64{rotx + tx, roty + ty, rotz + tz}
+}
+
+// dqsReference blends the per-vertex influences (joints/weights) against the
+// per-bone real/dual/scale palette exactly as the kernel does — antipodality
+// flip against influence 0's real quat, accumulate, normalize by |accReal|,
+// blend the uniform scale by Σw — then transforms p. This is the oracle.
+func dqsReference(realQ, dualQ [][4]float64, boneScale []float64, j [4]int, w, p [4]float64) [3]float64 {
+	ref := realQ[j[0]]
+	var accReal, accDual [4]float64
+	var scaleAcc, wsum float64
+	for c := 0; c < 4; c++ {
+		bk := j[c]
+		rk := realQ[bk]
+		dk := dualQ[bk]
+		wk := w[c]
+		wq := wk
+		if c != 0 { // influence 0 seeds; dot(ref,ref) >= 0 so it never flips
+			d := rk[0]*ref[0] + rk[1]*ref[1] + rk[2]*ref[2] + rk[3]*ref[3]
+			if d < 0 {
+				wq = -wk
+			}
+		}
+		for k := 0; k < 4; k++ {
+			accReal[k] += rk[k] * wq
+			accDual[k] += dk[k] * wq
+		}
+		scaleAcc += boneScale[bk] * wk
+		wsum += wk
+	}
+	inv := 1.0 / math.Sqrt(accReal[0]*accReal[0]+accReal[1]*accReal[1]+accReal[2]*accReal[2]+accReal[3]*accReal[3])
+	var r, d [4]float64
+	for k := 0; k < 4; k++ {
+		r[k] = accReal[k] * inv
+		d[k] = accDual[k] * inv
+	}
+	sb := scaleAcc * (1.0 / wsum)
+	return dqsTransform(r, d, [3]float64{p[0], p[1], p[2]}, [3]float64{sb, sb, sb})
+}
+
+// TestRunSkinDQS is the correctness anchor for the dual-quaternion skinning
+// kernel: it runs SkinDQS on the CPU fallback over a two-bone rig and asserts
+// the skinned positions against an independent in-test DQS oracle AND against
+// hand-derived values. The palette (real/dual quats per bone) is built in the
+// test from rotation+translation, exactly as the host does.
+//
+// Rig:
+//   - bone0: 90° about +Z (sends (1,0,0)->(0,1,0)), translate (5,0,0)
+//   - bone1: identity rotation, translate (0,3,0)
+//   - uniform scale 1 on both
+//
+// Vertices:
+//   - v0: 100% bone0 at p=(1,0,0) -> rotate to (0,1,0) + (5,0,0) = (5,1,0)
+//   - v1: 100% bone1 at p=(2,2,2) -> identity + (0,3,0) = (2,5,2)
+//   - v2: 50/50 bone0+bone1 at p=(1,0,0)
+func TestRunSkinDQS(t *testing.T) {
+	mod := ir.SkinDQS()
+
+	s := math.Sqrt2 / 2            // sin(pi/4) = cos(pi/4)
+	rot0 := [4]float64{0, 0, s, s} // 90 deg about +Z
+	rot1 := [4]float64{0, 0, 0, 1} // identity
+	pos0 := [3]float64{5, 0, 0}
+	pos1 := [3]float64{0, 3, 0}
+
+	realBones := [][4]float64{rot0, rot1}
+	dualBones := [][4]float64{
+		dualFromRotPos(rot0, pos0),
+		dualFromRotPos(rot1, pos1),
+	}
+	scaleBones := []float64{1, 1}
+
+	// Buffers for the kernel (as []any of []float64).
+	realQ := []any{
+		[]float64{rot0[0], rot0[1], rot0[2], rot0[3]},
+		[]float64{rot1[0], rot1[1], rot1[2], rot1[3]},
+	}
+	dualQ := []any{
+		[]float64{dualBones[0][0], dualBones[0][1], dualBones[0][2], dualBones[0][3]},
+		[]float64{dualBones[1][0], dualBones[1][1], dualBones[1][2], dualBones[1][3]},
+	}
+	boneScale := []any{
+		[]float64{1, 1, 1, 0},
+		[]float64{1, 1, 1, 0},
+	}
+
+	type vert struct {
+		p [4]float64
+		j [4]int
+		w [4]float64
+	}
+	verts := []vert{
+		{p: [4]float64{1, 0, 0, 1}, j: [4]int{0, 0, 0, 0}, w: [4]float64{1, 0, 0, 0}},
+		{p: [4]float64{2, 2, 2, 1}, j: [4]int{1, 0, 0, 0}, w: [4]float64{1, 0, 0, 0}},
+		{p: [4]float64{1, 0, 0, 1}, j: [4]int{0, 1, 0, 0}, w: [4]float64{0.5, 0.5, 0, 0}},
+	}
+
+	restPos := make([]any, len(verts))
+	joints := make([]any, len(verts))
+	weights := make([]any, len(verts))
+	dst := make([]any, len(verts))
+	for i, v := range verts {
+		restPos[i] = []float64{v.p[0], v.p[1], v.p[2], v.p[3]}
+		joints[i] = []float64{float64(v.j[0]), float64(v.j[1]), float64(v.j[2]), float64(v.j[3])}
+		weights[i] = []float64{v.w[0], v.w[1], v.w[2], v.w[3]}
+		// dst is written componentwise (dst[i].x = ...), so each cell must be a
+		// pre-allocated vec4 — as the host allocates the output buffer.
+		dst[i] = []float64{0, 0, 0, 0}
+	}
+
+	mem := &Memory{Vars: map[string]any{
+		"restPos":   restPos,
+		"joints":    joints,
+		"weights":   weights,
+		"realQ":     realQ,
+		"dualQ":     dualQ,
+		"boneScale": boneScale,
+		"dst":       dst,
+	}}
+
+	if err := Run(mod, "main", len(verts), mem); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Hand-derived spot checks for the two single-bone vertices.
+	hand := map[int][3]float64{
+		0: {5, 1, 0}, // 90deg-Z: (1,0,0)->(0,1,0), + pos0(5,0,0)
+		1: {2, 5, 2}, // identity, + pos1(0,3,0)
+	}
+
+	for i, v := range verts {
+		want := dqsReference(realBones, dualBones, scaleBones, v.j, v.w, v.p)
+		if h, ok := hand[i]; ok {
+			for c := 0; c < 3; c++ {
+				if abs(want[c]-h[c]) > 1e-9 {
+					t.Fatalf("oracle disagrees with hand-derived for v%d: oracle=%v hand=%v", i, want, h)
+				}
+			}
+		}
+		got, ok := dst[i].([]float64)
+		if !ok || len(got) < 4 {
+			t.Fatalf("dst[%d] = %v, want a vec4", i, dst[i])
+		}
+		for c := 0; c < 3; c++ {
+			if abs(got[c]-want[c]) > 1e-6 {
+				t.Fatalf("dst[%d] = (%g,%g,%g), want (%g,%g,%g)",
+					i, got[0], got[1], got[2], want[0], want[1], want[2])
+			}
+		}
+		if abs(got[3]-1) > 1e-9 {
+			t.Errorf("dst[%d].w = %g, want 1", i, got[3])
 		}
 	}
 }
