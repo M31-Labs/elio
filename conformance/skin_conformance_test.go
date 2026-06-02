@@ -39,3 +39,27 @@ func TestSkinLBSAllBackends(t *testing.T) {
 		}
 	}
 }
+
+// TestSqrtAllBackends validates the sqrt builtin emits on every backend.
+func TestSqrtAllBackends(t *testing.T) {
+	mod := ir.SqrtKernel()
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	validate(t, "naga", "sqrt.wgsl", wsrc, func(f string) []string { return []string{f} })
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	validate(t, "glslangValidator", "sqrt.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	msrc, err := metal.Emit(mod)
+	if err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+	for _, want := range []string{"kernel void main(", "sqrt("} {
+		if !strings.Contains(msrc, want) {
+			t.Errorf("metal missing %q\n%s", want, msrc)
+		}
+	}
+}

@@ -150,3 +150,17 @@ func TestRunSkinLBSRotation(t *testing.T) {
 		}
 	}
 }
+
+// TestRunSqrt exercises the sqrt builtin via SqrtKernel: out = p * |p|.
+func TestRunSqrt(t *testing.T) {
+	a := []any{[]float64{3, 4, 0, 0}, []float64{0, 0, 0, 0}}
+	out := []any{nil, nil}
+	mem := &Memory{Vars: map[string]any{"a": a, "dst": out}}
+	if err := Run(ir.SqrtKernel(), "main", 2, mem); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	g := out[0].([]float64) // |{3,4,0,0}| = 5 → {15,20,0,0}
+	if abs(g[0]-15) > 1e-9 || abs(g[1]-20) > 1e-9 || abs(g[2]) > 1e-9 {
+		t.Fatalf("sqrt kernel out[0] = %v, want {15,20,0,0}", g)
+	}
+}
