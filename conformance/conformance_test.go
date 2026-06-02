@@ -1,7 +1,8 @@
-// Package conformance cross-checks a single Elio kernel across every backend —
-// WGSL (naga), GLSL (glslang→SPIR-V), Metal (structural), and the CPU
-// interpreter (executed) — so the IR, emitters, and interpreter are proven to
-// agree on more than the cull kernel.
+// Package conformance cross-checks Elio kernels across every backend — WGSL
+// (naga), GLSL (glslang→SPIR-V), Metal (structural), and the CPU interpreter
+// (executed) — so the IR, emitters, and interpreter are proven to agree. It
+// covers both flagship kernels: cull (atomics, control flow, swizzles) and
+// ScaleBias (vector arithmetic).
 package conformance
 
 import (
@@ -62,6 +63,42 @@ func TestScaleBiasAllBackends(t *testing.T) {
 	}
 	if !eqVec(dst[1], []float64{11, 13, 15, 17}) {
 		t.Errorf("dst[1] = %v, want [11 13 15 17]", dst[1])
+	}
+}
+
+// TestCullAllBackends cross-validates the flagship frustum-culling kernel — the
+// hard case the emitters must agree on: a uniform block, read + read_write
+// storage buffers, an atomic array, arrayLength, a bounded loop with break, a
+// matrix-column index, and swizzles. (CPU execution of this kernel, with a real
+// frustum, lives in run.TestRunCull.)
+func TestCullAllBackends(t *testing.T) {
+	mod := ir.CullKernel()
+
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	validate(t, "naga", "cull.wgsl", wsrc, func(f string) []string { return []string{f} })
+
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	validate(t, "glslangValidator", "cull.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+
+	msrc, err := metal.Emit(mod)
+	if err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+	for _, want := range []string{
+		"kernel void main(",
+		"struct InstanceRecord",
+		"device atomic_uint* drawArgs",
+		"atomic_fetch_add_explicit",
+	} {
+		if !strings.Contains(msrc, want) {
+			t.Errorf("metal missing %q\n%s", want, msrc)
+		}
 	}
 }
 
