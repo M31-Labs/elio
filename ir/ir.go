@@ -136,13 +136,51 @@ type Module struct {
 
 // --- Statements ---
 
+// Span is a 1-based source position (the start of a construct). The zero value
+// means "unknown" — hand-built IR and the recursive-descent parser leave it
+// unset; the grammargen front-end populates it so diagnostics carry line:col.
+type Span struct {
+	Line, Col int
+}
+
+// IsZero reports whether the span is unknown.
+func (s Span) IsZero() bool { return s.Line == 0 && s.Col == 0 }
+
 // Stmt is one imperative statement.
 type Stmt interface{ isStmt() }
+
+// StmtSpan returns a statement's source position, or the zero Span if unknown.
+func StmtSpan(s Stmt) Span {
+	switch x := s.(type) {
+	case Let:
+		return x.Span
+	case Var:
+		return x.Span
+	case Assign:
+		return x.Span
+	case If:
+		return x.Span
+	case For:
+		return x.Span
+	case While:
+		return x.Span
+	case Return:
+		return x.Span
+	case Break:
+		return x.Span
+	case Barrier:
+		return x.Span
+	case Do:
+		return x.Span
+	}
+	return Span{}
+}
 
 // Let binds an immutable local: let Name = Value;
 type Let struct {
 	Name  string
 	Value Expr
+	Span  Span
 }
 
 // Var declares a mutable local: var Name [: Type] = Init;
@@ -150,6 +188,7 @@ type Var struct {
 	Name string
 	Type Type // optional; nil omits the annotation
 	Init Expr
+	Span Span
 }
 
 // Assign is Target = Value; or a compound assignment Target Op= Value. Op is ""
@@ -158,6 +197,7 @@ type Assign struct {
 	Target Expr
 	Value  Expr
 	Op     string
+	Span   Span
 }
 
 // If is if (Cond) { Then } [else { Else }].
@@ -165,6 +205,7 @@ type If struct {
 	Cond Expr
 	Then []Stmt
 	Else []Stmt
+	Span Span
 }
 
 // For is for (Init; Cond; Post) { Body }.
@@ -173,27 +214,32 @@ type For struct {
 	Cond Expr
 	Post Stmt
 	Body []Stmt
+	Span Span
 }
 
 // While is while (Cond) { Body }.
 type While struct {
 	Cond Expr
 	Body []Stmt
+	Span Span
 }
 
 // Return is return;
-type Return struct{}
+type Return struct{ Span Span }
 
 // Break is break;
-type Break struct{}
+type Break struct{ Span Span }
 
 // Do evaluates Expr for its side effect: Expr;
-type Do struct{ Expr Expr }
+type Do struct {
+	Expr Expr
+	Span Span
+}
 
 // Barrier is a workgroup control barrier: every invocation in the workgroup must
 // reach it before any proceeds, and shared writes before it are visible after.
 // It must sit in uniform control flow (all invocations reach it).
-type Barrier struct{}
+type Barrier struct{ Span Span }
 
 func (Let) isStmt()     {}
 func (Var) isStmt()     {}

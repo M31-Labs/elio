@@ -88,6 +88,21 @@ func TestTypeChecks(t *testing.T) {
 	}
 }
 
+// TestDiagnosticSpan pins that a statement's source position is carried into the
+// diagnostic (line:col), when the IR has one.
+func TestDiagnosticSpan(t *testing.T) {
+	mod := &ir.Module{Kernels: []ir.Kernel{{
+		Name: "main", WorkgroupSize: [3]int{1, 1, 1},
+		Body: []ir.Stmt{
+			ir.Let{Name: "x", Value: ir.Name{Name: "missing"}, Span: ir.Span{Line: 5, Col: 11}},
+		},
+	}}}
+	got := Errors(Check(mod))
+	if got == nil || !strings.Contains(got.Error(), "5:11:") {
+		t.Fatalf("expected diagnostic to carry 5:11, got: %v", got)
+	}
+}
+
 // TestConstSemantics pins that a module constant resolves in kernel code but
 // cannot be assigned to.
 func TestConstSemantics(t *testing.T) {

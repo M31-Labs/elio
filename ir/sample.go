@@ -31,20 +31,20 @@ func CullKernel() *Module {
 			WorkgroupSize: [3]int{64, 1, 1},
 			Builtins:      []Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: Vec{3, U32}}},
 			Body: []Stmt{
-				Let{"i", Member{Name{"gid"}, "x"}},
+				Let{Name: "i", Value: Member{Name{"gid"}, "x"}},
 				If{
 					Cond: Binary{">=", Name{"i"}, Call{"arrayLength", []Expr{AddrOf{Name{"input"}}}}},
 					Then: []Stmt{Return{}},
 				},
-				Let{"record", Index{Name{"input"}, Name{"i"}}},
-				Let{"center", Member{Index{Member{Name{"record"}, "model"}, Lit{"3"}}, "xyz"}},
+				Let{Name: "record", Value: Index{Name{"input"}, Name{"i"}}},
+				Let{Name: "center", Value: Member{Index{Member{Name{"record"}, "model"}, Lit{"3"}}, "xyz"}},
 				Var{Name: "inside", Init: Lit{"true"}},
 				For{
 					Init: Var{Name: "p", Type: I32, Init: Lit{"0"}},
 					Cond: Binary{"<", Name{"p"}, Lit{"6"}},
 					Post: Assign{Target: Name{"p"}, Value: Binary{"+", Name{"p"}, Lit{"1"}}},
 					Body: []Stmt{
-						Let{"plane", Index{Member{Name{"cull"}, "planes"}, Name{"p"}}},
+						Let{Name: "plane", Value: Index{Member{Name{"cull"}, "planes"}, Name{"p"}}},
 						If{
 							Cond: Binary{"<",
 								Binary{"+",
@@ -58,7 +58,7 @@ func CullKernel() *Module {
 				If{
 					Cond: Name{"inside"},
 					Then: []Stmt{
-						Let{"slot", Call{"atomicAdd", []Expr{AddrOf{Index{Name{"drawArgs"}, Lit{"1"}}}, Lit{"1u"}}}},
+						Let{Name: "slot", Value: Call{"atomicAdd", []Expr{AddrOf{Index{Name{"drawArgs"}, Lit{"1"}}}, Lit{"1u"}}}},
 						Assign{Target: Index{Name{"output"}, Name{"slot"}}, Value: Name{"record"}},
 					},
 				},
@@ -92,7 +92,7 @@ func WorkgroupReduce() *Module {
 			},
 			Shared: []Shared{{Name: "scratch", Type: Array{Elem: F32, Len: 64}}},
 			Body: []Stmt{
-				Let{"t", tid},
+				Let{Name: "t", Value: tid},
 				// scratch[t] = src[gid.x];
 				Assign{Target: scratchAt(Name{"t"}), Value: Index{Name{"src"}, Member{Name{"gid"}, "x"}}},
 				Barrier{},
@@ -144,7 +144,7 @@ func ScaleBias() *Module {
 			WorkgroupSize: [3]int{64, 1, 1},
 			Builtins:      []Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: Vec{3, U32}}},
 			Body: []Stmt{
-				Let{"i", Member{Name{"gid"}, "x"}},
+				Let{Name: "i", Value: Member{Name{"gid"}, "x"}},
 				If{
 					Cond: Binary{">=", Name{"i"}, Call{"arrayLength", []Expr{AddrOf{Name{"src"}}}}},
 					Then: []Stmt{Return{}},

@@ -93,36 +93,59 @@ func (w *treeWalker) typ(n *gts.Node) string                { return n.Type(w.la
 func (w *treeWalker) text(n *gts.Node) string               { return n.Text(w.src) }
 func (w *treeWalker) field(n *gts.Node, f string) *gts.Node { return n.ChildByFieldName(f, w.lang) }
 
+// span is the 1-based source position where n begins.
+func (w *treeWalker) span(n *gts.Node) ir.Span {
+	pt := n.StartPoint()
+	return ir.Span{Line: int(pt.Row) + 1, Col: int(pt.Column) + 1}
+}
+
 func (w *treeWalker) syntaxError(n *gts.Node) error {
-	// Find the deepest error/missing node for a precise message.
-	var find func(n *gts.Node) *gts.Node
-	find = func(n *gts.Node) *gts.Node {
+	// GLR error recovery often wraps the whole input in one coarse ERROR node, so
+	// the *deepest* error isn't the most useful. Collect every error/missing leaf
+	// and report the latest-positioned one — in LR parsing the failure surfaces at
+	// or just before the token where the parser got stuck — preferring MISSING
+	// nodes (which pinpoint an expected-but-absent token).
+	var best *gts.Node
+	bestMissing := false
+	var walk func(n *gts.Node)
+	walk = func(n *gts.Node) {
+		bad := n.Type(w.lang) == "ERROR" || n.IsError() || n.IsMissing()
+		childBad := false
 		for i := 0; i < n.ChildCount(); i++ {
 			c := n.Child(i)
 			if c == nil {
 				continue
 			}
 			if c.Type(w.lang) == "ERROR" || c.IsError() || c.IsMissing() {
-				if deeper := find(c); deeper != nil {
-					return deeper
-				}
-				return c
+				childBad = true
 			}
-			if deeper := find(c); deeper != nil {
-				return deeper
-			}
+			walk(c)
 		}
-		return nil
+		if bad && !childBad { // a leaf error/missing node
+			miss := n.IsMissing()
+			switch {
+			case best == nil:
+			case miss && !bestMissing:
+			case miss == bestMissing && n.StartByte() > best.StartByte():
+			default:
+				return
+			}
+			best, bestMissing = n, miss
+		}
 	}
-	bad := find(n)
-	if bad == nil {
+	walk(n)
+	if best == nil {
 		return fmt.Errorf("parse: syntax error")
 	}
-	near := strings.TrimSpace(w.text(bad))
+	pt := best.StartPoint()
+	if best.IsMissing() {
+		return fmt.Errorf("parse: %d:%d: syntax error: expected %s", pt.Row+1, pt.Column+1, best.Type(w.lang))
+	}
+	near := strings.TrimSpace(w.text(best))
 	if len(near) > 30 {
 		near = near[:30] + "…"
 	}
-	return fmt.Errorf("parse: syntax error at byte %d near %q", bad.StartByte(), near)
+	return fmt.Errorf("parse: %d:%d: syntax error near %q", pt.Row+1, pt.Column+1, near)
 }
 
 func (w *treeWalker) structDecl(n *gts.Node) (ir.Struct, error) {
@@ -279,15 +302,15 @@ func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		return ir.Let{Name: w.text(w.field(n, "name")), Value: v}, nil
+		return ir.Let{Name: w.text(w.field(n, "name")), Value: v, Span: w.span(n)}, nil
 	case "var_stmt":
 		return w.varInner(n.NamedChild(0))
 	case "return_stmt":
-		return ir.Return{}, nil
+		return ir.Return{Span: w.span(n)}, nil
 	case "break_stmt":
-		return ir.Break{}, nil
+		return ir.Break{Span: w.span(n)}, nil
 	case "barrier_stmt":
-		return ir.Barrier{}, nil
+		return ir.Barrier{Span: w.span(n)}, nil
 	case "if_stmt":
 		return w.ifStmt(n)
 	case "for_stmt":
@@ -301,7 +324,7 @@ func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		return ir.While{Cond: cond, Body: body}, nil
+		return ir.While{Cond: cond, Body: body, Span: w.span(n)}, nil
 	case "assign_stmt":
 		return w.assignInner(n.NamedChild(0))
 	}
@@ -309,7 +332,7 @@ func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
 }
 
 func (w *treeWalker) varInner(n *gts.Node) (ir.Stmt, error) {
-	v := ir.Var{Name: w.text(w.field(n, "name"))}
+	v := ir.Var{Name: w.text(w.field(n, "name")), Span: w.span(n)}
 	if t := w.field(n, "type"); t != nil {
 		typ, err := w.typeOf(t)
 		if err != nil {
@@ -334,7 +357,7 @@ func (w *treeWalker) assignInner(n *gts.Node) (ir.Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ir.Assign{Target: target, Value: value, Op: compoundOp(w.text(w.field(n, "op")))}, nil
+	return ir.Assign{Target: target, Value: value, Op: compoundOp(w.text(w.field(n, "op"))), Span: w.span(n)}, nil
 }
 
 // compoundOp maps an assignment operator token to ir.Assign.Op: "=" → "" (plain
@@ -355,7 +378,7 @@ func (w *treeWalker) ifStmt(n *gts.Node) (ir.Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := ir.If{Cond: cond, Then: then}
+	out := ir.If{Cond: cond, Then: then, Span: w.span(n)}
 	if e := w.field(n, "else"); e != nil {
 		switch w.typ(e) {
 		case "if_stmt":
@@ -402,7 +425,7 @@ func (w *treeWalker) forStmt(n *gts.Node) (ir.Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ir.For{Init: init, Cond: cond, Post: post, Body: body}, nil
+	return ir.For{Init: init, Cond: cond, Post: post, Body: body, Span: w.span(n)}, nil
 }
 
 func (w *treeWalker) expr(n *gts.Node) (ir.Expr, error) {

@@ -166,11 +166,15 @@ func (s *scope) define(n string, k symKind, t ir.Type) { s.syms[n] = symInfo{kin
 type checker struct {
 	structs map[string]map[string]ir.Type // struct name → field name → field type
 	kernel  string
+	span    ir.Span // source position of the statement currently being checked
 	errs    []error
 }
 
 func (c *checker) errf(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
+	if !c.span.IsZero() {
+		msg = fmt.Sprintf("%d:%d: %s", c.span.Line, c.span.Col, msg)
+	}
 	if c.kernel != "" {
 		msg = fmt.Sprintf("kernel %q: %s", c.kernel, msg)
 	}
@@ -196,6 +200,7 @@ func (c *checker) checkBlock(parent *scope, stmts []ir.Stmt) {
 }
 
 func (c *checker) checkStmt(s *scope, st ir.Stmt) {
+	c.span = ir.StmtSpan(st)
 	switch st := st.(type) {
 	case ir.Let:
 		c.checkExpr(s, st.Value)
@@ -226,6 +231,7 @@ func (c *checker) checkStmt(s *scope, st ir.Stmt) {
 		if st.Init != nil {
 			c.checkStmt(fs, st.Init)
 		}
+		c.span = st.Span // checkStmt(Init) moved the span; restore the for's
 		c.checkExpr(fs, st.Cond)
 		if st.Post != nil {
 			c.checkStmt(fs, st.Post)
