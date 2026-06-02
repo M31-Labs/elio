@@ -255,6 +255,27 @@ func TestHiZEmits(t *testing.T) {
 	}
 }
 
+// TestSkinEmits validates the linear-blend skinning kernel across the GPU
+// backends — a storage array of mat4 bones, matrix-column indexing
+// (bones[i][0]), vector arithmetic, and a struct of mixed f32/u32 fields.
+// Execution (the 50/50 bone blend) is proven in stdlib.
+func TestSkinEmits(t *testing.T) {
+	mod := stdlib.Skin()
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	validate(t, "naga", "skin.wgsl", wsrc, func(f string) []string { return []string{f} })
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	validate(t, "glslangValidator", "skin.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	if _, err := metal.Emit(mod); err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+}
+
 func validate(t *testing.T, bin, fname, src string, args func(string) []string) {
 	t.Helper()
 	path, err := exec.LookPath(bin)

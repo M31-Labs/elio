@@ -422,6 +422,14 @@ var glslReserved = map[string]bool{
 	"long": true, "short": true, "half": true, "fixed": true, "unsigned": true,
 	"superp": true, "filter": true, "sizeof": true, "cast": true,
 	"namespace": true, "using": true,
+	// flow / storage / memory qualifiers
+	"in": true, "out": true, "inout": true, "uniform": true, "buffer": true,
+	"shared": true, "attribute": true, "varying": true, "layout": true,
+	"coherent": true, "volatile": true, "restrict": true, "readonly": true,
+	"writeonly": true, "flat": true, "smooth": true, "noperspective": true,
+	"centroid": true, "sample": true, "patch": true, "subroutine": true,
+	"precision": true, "discard": true, "invariant": true, "precise": true,
+	"lowp": true, "mediump": true, "highp": true,
 }
 
 func safe(name string) string {
