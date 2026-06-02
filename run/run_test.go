@@ -166,3 +166,26 @@ func TestRunWhile(t *testing.T) {
 		t.Errorf("acc[0] = %v, want 45 (0+1+…+9)", acc[0])
 	}
 }
+
+// TestRunConst verifies a module-level constant is evaluated once and readable
+// from a kernel: acc[i] = FACTOR (= 3).
+func TestRunConst(t *testing.T) {
+	mod := &ir.Module{
+		Consts:   []ir.Const{{Name: "FACTOR", Type: ir.F32, Value: ir.Lit{Text: "3.0"}}},
+		Bindings: []ir.Binding{{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.ReadWrite, Name: "acc", Type: ir.Array{Elem: ir.F32}}},
+		Kernels: []ir.Kernel{{
+			Name: "main", WorkgroupSize: [3]int{1, 1, 1},
+			Builtins: []ir.Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+			Body: []ir.Stmt{
+				ir.Assign{Target: ir.Index{E: ir.Name{Name: "acc"}, Idx: ir.Member{E: ir.Name{Name: "gid"}, Field: "x"}}, Value: ir.Name{Name: "FACTOR"}},
+			},
+		}},
+	}
+	acc := []float64{0}
+	if err := Run(mod, "main", 1, &Memory{Vars: map[string]any{"acc": acc}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if acc[0] != 3 {
+		t.Errorf("acc[0] = %v, want 3", acc[0])
+	}
+}

@@ -50,8 +50,17 @@ func Check(m *ir.Module) []error {
 		}
 	}
 
-	// Module bindings populate the global scope.
+	// Module-level constants and bindings populate the global scope. Consts are
+	// checked in order, so a const may reference earlier consts but not bindings.
 	global := newScope(nil)
+	for _, cn := range m.Consts {
+		c.checkType("const "+cn.Name, cn.Type)
+		c.checkExpr(global, cn.Value)
+		if _, dup := global.syms[cn.Name]; dup {
+			c.errf("duplicate const %q", cn.Name)
+		}
+		global.define(cn.Name, kConst, cn.Type)
+	}
 	slots := map[[2]int]string{}
 	for _, b := range m.Bindings {
 		slot := [2]int{b.Group, b.Binding}
@@ -100,6 +109,7 @@ const (
 	kStorageRead
 	kStorageRW
 	kShared // workgroup-shared variable: mutable, but not a storage buffer (no &)
+	kConst  // module-level compile-time constant: immutable
 )
 
 func bindingKind(b ir.Binding) symKind {
@@ -122,6 +132,8 @@ func (k symKind) immutableHint() string {
 		return "a uniform binding is read-only"
 	case kStorageRead:
 		return "a read-only storage buffer; bind it storage read_write to write"
+	case kConst:
+		return "a const is immutable"
 	}
 	return "read-only"
 }

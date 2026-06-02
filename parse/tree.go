@@ -57,6 +57,16 @@ func ParseTree(src string) (*ir.Module, error) {
 				return nil, err
 			}
 			m.Structs = append(m.Structs, s)
+		case "const_decl":
+			t, err := w.typeOf(w.field(c, "type"))
+			if err != nil {
+				return nil, err
+			}
+			v, err := w.expr(w.field(c, "value"))
+			if err != nil {
+				return nil, err
+			}
+			m.Consts = append(m.Consts, ir.Const{Name: w.text(w.field(c, "name")), Type: t, Value: v})
 		case "binding_decl":
 			b, err := w.binding(c)
 			if err != nil {

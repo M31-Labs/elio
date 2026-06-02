@@ -157,6 +157,12 @@ func (p *parser) module() (*ir.Module, error) {
 				return nil, err
 			}
 			m.Structs = append(m.Structs, s)
+		case p.isIdent("const"):
+			cn, err := p.constDecl()
+			if err != nil {
+				return nil, err
+			}
+			m.Consts = append(m.Consts, cn)
 		case p.isPunct("@"):
 			next := p.toks[p.i+1]
 			if next.kind == tIdent && next.val == "group" {
@@ -179,6 +185,32 @@ func (p *parser) module() (*ir.Module, error) {
 		}
 	}
 	return m, nil
+}
+
+func (p *parser) constDecl() (ir.Const, error) {
+	p.next() // const
+	name, err := p.wantIdent()
+	if err != nil {
+		return ir.Const{}, err
+	}
+	if err := p.wantPunct(":"); err != nil {
+		return ir.Const{}, err
+	}
+	t, err := p.typ()
+	if err != nil {
+		return ir.Const{}, err
+	}
+	if err := p.wantPunct("="); err != nil {
+		return ir.Const{}, err
+	}
+	v, err := p.expr()
+	if err != nil {
+		return ir.Const{}, err
+	}
+	if err := p.wantPunct(";"); err != nil {
+		return ir.Const{}, err
+	}
+	return ir.Const{Name: name, Type: t, Value: v}, nil
 }
 
 func (p *parser) structDecl() (ir.Struct, error) {

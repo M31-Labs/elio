@@ -24,6 +24,12 @@ func Emit(m *ir.Module) (string, error) {
 		emitStruct(&b, s)
 		b.WriteString("\n")
 	}
+	for _, cn := range m.Consts {
+		fmt.Fprintf(&b, "constant %s %s = %s;\n", typeName(cn.Type), cn.Name, expr(cn.Value))
+	}
+	if len(m.Consts) > 0 {
+		b.WriteString("\n")
+	}
 	for i, k := range m.Kernels {
 		if i > 0 {
 			b.WriteString("\n")

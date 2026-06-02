@@ -118,10 +118,18 @@ type Kernel struct {
 	Body          []Stmt
 }
 
-// Module is a complete compute unit: declared structs, module bindings, and one
-// or more kernels.
+// Const is a module-level compile-time constant: const Name : Type = Value;
+type Const struct {
+	Name  string
+	Type  Type
+	Value Expr
+}
+
+// Module is a complete compute unit: declared structs, module-level constants,
+// bindings, and one or more kernels.
 type Module struct {
 	Structs  []Struct
+	Consts   []Const
 	Bindings []Binding
 	Kernels  []Kernel
 }

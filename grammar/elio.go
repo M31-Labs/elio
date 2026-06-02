@@ -37,8 +37,16 @@ func ElioGrammar() *grammargen.Grammar {
 	g := grammargen.NewGrammar("elio")
 
 	g.Define("source_file", rep(choice(
-		sym("struct_decl"), sym("binding_decl"), sym("kernel_decl"),
+		sym("struct_decl"), sym("const_decl"), sym("binding_decl"), sym("kernel_decl"),
 	)))
+
+	// const Name : Type = Value;  (scalar type + literal value only: pulling the
+	// `type`/`expression` machinery to module scope tips grammargen's LALR-merge
+	// threshold and breaks unrelated top-level rules — see package doc)
+	g.Define("const_decl", seq(
+		s("const"), field("name", sym("identifier")), s(":"), field("type", sym("identifier")),
+		s("="), field("value", sym("number")), s(";"),
+	))
 
 	// struct Name { field: type; … }
 	g.Define("struct_decl", seq(

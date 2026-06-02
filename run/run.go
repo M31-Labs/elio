@@ -60,6 +60,10 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 	if k == nil {
 		return fmt.Errorf("run: kernel %q not found", kernelName)
 	}
+	consts, err := evalConsts(m, mem)
+	if err != nil {
+		return err
+	}
 	total := k.WorkgroupSize[0] * k.WorkgroupSize[1] * k.WorkgroupSize[2]
 	if total < 1 {
 		total = 1
@@ -71,7 +75,7 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 	// reductions and scans, not just maps.
 	if len(k.Shared) == 0 {
 		for gid := 0; gid < count; gid++ {
-			ev := &evaluator{mem: mem, locals: map[string]any{}}
+			ev := &evaluator{mem: mem, locals: map[string]any{}, consts: consts}
 			setBuiltins(ev, k, gid, total)
 			if _, err := ev.execBlock(k.Body); err != nil {
 				return fmt.Errorf("run: invocation %d: %w", gid, err)
@@ -93,7 +97,7 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 			go func(l int) {
 				defer wgrp.Done()
 				gid := wg*total + l
-				ev := &evaluator{mem: mem, locals: map[string]any{}, shared: shared, barrier: bar}
+				ev := &evaluator{mem: mem, locals: map[string]any{}, shared: shared, consts: consts, barrier: bar}
 				setBuiltins(ev, k, gid, total)
 				_, errs[l] = ev.execBlock(k.Body)
 			}(l)
@@ -106,6 +110,21 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 		}
 	}
 	return nil
+}
+
+// evalConsts evaluates the module's constants once, in order, so each may
+// reference earlier ones. The result is shared read-only by every invocation.
+func evalConsts(m *ir.Module, mem *Memory) (map[string]any, error) {
+	consts := map[string]any{}
+	cev := &evaluator{mem: mem, locals: map[string]any{}, consts: consts}
+	for _, cn := range m.Consts {
+		v, err := cev.eval(cn.Value)
+		if err != nil {
+			return nil, fmt.Errorf("run: const %q: %w", cn.Name, err)
+		}
+		consts[cn.Name] = v
+	}
+	return consts, nil
 }
 
 // setBuiltins binds a kernel's @builtin inputs for the invocation at global
@@ -181,6 +200,7 @@ type evaluator struct {
 	mem     *Memory
 	locals  map[string]any
 	shared  map[string]any // workgroup-shared store (nil for non-shared kernels)
+	consts  map[string]any // module-level constants (shared, read-only)
 	barrier *barrier       // workgroup barrier (nil for non-shared kernels)
 }
 
@@ -189,6 +209,9 @@ func (ev *evaluator) lookup(name string) (any, bool) {
 		return v, true
 	}
 	if v, ok := ev.shared[name]; ok {
+		return v, true
+	}
+	if v, ok := ev.consts[name]; ok {
 		return v, true
 	}
 	v, ok := ev.mem.Vars[name]

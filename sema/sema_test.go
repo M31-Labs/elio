@@ -88,6 +88,29 @@ func TestTypeChecks(t *testing.T) {
 	}
 }
 
+// TestConstSemantics pins that a module constant resolves in kernel code but
+// cannot be assigned to.
+func TestConstSemantics(t *testing.T) {
+	mk := func(body ...ir.Stmt) *ir.Module {
+		return &ir.Module{
+			Consts: []ir.Const{{Name: "PI", Type: ir.F32, Value: ir.Lit{Text: "3.14"}}},
+			Kernels: []ir.Kernel{{
+				Name: "main", WorkgroupSize: [3]int{1, 1, 1},
+				Body: body,
+			}},
+		}
+	}
+	// referencing a const is fine
+	if errs := Check(mk(ir.Let{Name: "x", Value: ir.Name{Name: "PI"}})); len(errs) != 0 {
+		t.Fatalf("expected const reference to be valid, got: %v", Errors(errs))
+	}
+	// assigning to a const is an error
+	got := Errors(Check(mk(ir.Assign{Target: ir.Name{Name: "PI"}, Value: ir.Lit{Text: "1.0"}})))
+	if got == nil || !strings.Contains(got.Error(), `cannot assign to "PI"`) {
+		t.Fatalf("expected const-immutability diagnostic, got: %v", got)
+	}
+}
+
 // kernel wraps a body in a minimal module with the given bindings for testing.
 func kernel(bindings []ir.Binding, body ...ir.Stmt) *ir.Module {
 	return &ir.Module{

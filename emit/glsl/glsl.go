@@ -64,6 +64,12 @@ func (e *emitter) emit() (string, error) {
 		e.emitStruct(s)
 		e.b.WriteString("\n")
 	}
+	for _, cn := range e.m.Consts {
+		fmt.Fprintf(&e.b, "const %s %s = %s;\n", typeName(cn.Type), safe(cn.Name), e.expr(cn.Value))
+	}
+	if len(e.m.Consts) > 0 {
+		e.b.WriteString("\n")
+	}
 	for _, b := range e.m.Bindings {
 		e.emitBinding(b)
 	}

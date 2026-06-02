@@ -19,6 +19,12 @@ func Emit(m *ir.Module) (string, error) {
 		emitStruct(&b, s)
 		b.WriteString("\n")
 	}
+	for _, cn := range m.Consts {
+		fmt.Fprintf(&b, "const %s : %s = %s;\n", cn.Name, typeName(cn.Type), expr(cn.Value))
+	}
+	if len(m.Consts) > 0 {
+		b.WriteString("\n")
+	}
 	for _, bnd := range m.Bindings {
 		emitBinding(&b, bnd)
 	}
