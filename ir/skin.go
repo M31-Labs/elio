@@ -89,3 +89,29 @@ func weightedInfluence(comp string) (Stmt, Expr) {
 	return Let{baseName, Binary{"*", Member{Name{"j"}, comp}, Lit{"4u"}}},
 		Binary{"*", transform(Name{baseName}), Member{Name{"w"}, comp}}
 }
+
+// SqrtKernel is a minimal kernel exercising the sqrt builtin (the elio language
+// addition that dual-quaternion skinning needs for its normalize step). For
+// each input vec4 p it writes out[i] = p * sqrt(dot(p,p)) = p * |p|. With
+// p = {3,4,0,0}, |p| = 5, so out = {15,20,0,0}. Validates that sqrt emits on
+// every backend (WGSL/GLSL/Metal name it `sqrt`) and runs on the CPU oracle.
+func SqrtKernel() *Module {
+	return &Module{
+		Bindings: []Binding{
+			{Group: 0, Binding: 0, Space: Storage, Access: Read, Name: "a", Type: Array{Elem: Vec{4, F32}}},
+			{Group: 0, Binding: 1, Space: Storage, Access: ReadWrite, Name: "dst", Type: Array{Elem: Vec{4, F32}}},
+		},
+		Kernels: []Kernel{{
+			Name:          "main",
+			WorkgroupSize: [3]int{64, 1, 1},
+			Builtins:      []Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: Vec{3, U32}}},
+			Body: []Stmt{
+				Let{"i", Member{Name{"gid"}, "x"}},
+				If{Cond: Binary{">=", Name{"i"}, Call{"arrayLength", []Expr{AddrOf{Name{"a"}}}}}, Then: []Stmt{Return{}}},
+				Let{"p", Index{Name{"a"}, Name{"i"}}},
+				Let{"s", Call{"sqrt", []Expr{Call{"dot", []Expr{Name{"p"}, Name{"p"}}}}}},
+				Assign{Target: Index{Name{"dst"}, Name{"i"}}, Value: Binary{"*", Name{"p"}, Name{"s"}}},
+			},
+		}},
+	}
+}

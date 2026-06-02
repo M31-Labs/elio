@@ -11,6 +11,7 @@ package run
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -431,6 +432,12 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		old := sr.arr[sr.idx]
 		sr.arr[sr.idx] = old + toFloat(add)
 		return old, nil
+	case "sqrt":
+		v, err := ev.eval(c.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return math.Sqrt(toFloat(v)), nil
 	}
 	return nil, fmt.Errorf("run: unsupported call %q", c.Func)
 }
