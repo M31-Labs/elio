@@ -16,6 +16,11 @@ import "m31labs.dev/elio/ir"
 // tileWidth is the workgroup size every primitive here scans/reduces over.
 const tileWidth = 64
 
+// Reduce returns a workgroup sum-reduction — one partial per 64-lane tile. It
+// completes the primitive trio (Reduce, Scan, Compact); its implementation and
+// execution test live with the reduction kernel in package ir.
+func Reduce() *ir.Module { return ir.WorkgroupReduce() }
+
 // Scan returns a workgroup inclusive prefix-sum (Hillis-Steele) over u32:
 // output[i] = input[0] + … + input[i] within each 64-lane tile. It is the
 // keystone primitive — stream compaction turns a predicate into output offsets
