@@ -322,6 +322,34 @@ func (ev *evaluator) assign(target ir.Expr, v any) error {
 			return fmt.Errorf("run: cannot index-assign into %T", base)
 		}
 		return nil
+	case ir.Member:
+		base, err := ev.eval(t.E)
+		if err != nil {
+			return err
+		}
+		vec, ok := base.([]float64)
+		if !ok {
+			return fmt.Errorf("run: cannot member-assign into %T", base)
+		}
+		if len(t.Field) != 1 {
+			return fmt.Errorf("run: member-assign supports a single component, got .%s", t.Field)
+		}
+		ci := -1
+		switch t.Field[0] {
+		case 'x', 'r':
+			ci = 0
+		case 'y', 'g':
+			ci = 1
+		case 'z', 'b':
+			ci = 2
+		case 'w', 'a':
+			ci = 3
+		}
+		if ci < 0 || ci >= len(vec) {
+			return fmt.Errorf("run: bad member-assign .%s", t.Field)
+		}
+		vec[ci] = toFloat(v)
+		return nil
 	}
 	return fmt.Errorf("run: unsupported assign target %T", target)
 }

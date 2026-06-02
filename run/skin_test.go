@@ -151,6 +151,41 @@ func TestRunSkinLBSRotation(t *testing.T) {
 	}
 }
 
+// TestRunMemberAssign exercises the interpreter's member-assign support — the
+// one new statement shape the dual-quaternion kernel needs to write
+// dst[i].x = ... componentwise. It builds an inline module with a single
+// read_write vec4 buffer and a kernel that writes 7 into dst[i].x, then asserts
+// the slice cell was mutated in place.
+func TestRunMemberAssign(t *testing.T) {
+	mod := &ir.Module{
+		Bindings: []ir.Binding{
+			{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.ReadWrite, Name: "dst", Type: ir.Array{Elem: ir.Vec{N: 4, Elem: ir.F32}}},
+		},
+		Kernels: []ir.Kernel{{
+			Name:          "main",
+			WorkgroupSize: [3]int{64, 1, 1},
+			Builtins:      []ir.Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+			Body: []ir.Stmt{
+				ir.Let{Name: "i", Value: ir.Member{E: ir.Name{Name: "gid"}, Field: "x"}},
+				ir.Assign{
+					Target: ir.Member{E: ir.Index{E: ir.Name{Name: "dst"}, Idx: ir.Name{Name: "i"}}, Field: "x"},
+					Value:  ir.Lit{Text: "7.0"},
+				},
+			},
+		}},
+	}
+
+	dst := []any{[]float64{0, 0, 0, 0}}
+	mem := &Memory{Vars: map[string]any{"dst": dst}}
+	if err := Run(mod, "main", 1, mem); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := dst[0].([]float64)
+	if abs(got[0]-7) > 1e-9 {
+		t.Fatalf("dst[0].x = %v, want 7", got)
+	}
+}
+
 // TestRunSqrt exercises the sqrt builtin via SqrtKernel: out = p * |p|.
 func TestRunSqrt(t *testing.T) {
 	a := []any{[]float64{3, 4, 0, 0}, []float64{0, 0, 0, 0}}
