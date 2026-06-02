@@ -1,0 +1,139 @@
+package sema
+
+import (
+	"strings"
+	"testing"
+
+	"m31labs.dev/elio/ir"
+)
+
+// TestValidSamplesPass pins that the two reference kernels are accepted clean.
+func TestValidSamplesPass(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mod  *ir.Module
+	}{
+		{"cull", ir.CullKernel()},
+		{"scalebias", ir.ScaleBias()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if errs := Check(tc.mod); len(errs) != 0 {
+				t.Fatalf("expected no diagnostics, got:\n%v", Errors(errs))
+			}
+		})
+	}
+}
+
+// kernel wraps a body in a minimal module with the given bindings for testing.
+func kernel(bindings []ir.Binding, body ...ir.Stmt) *ir.Module {
+	return &ir.Module{
+		Bindings: bindings,
+		Kernels: []ir.Kernel{{
+			Name:          "main",
+			WorkgroupSize: [3]int{64, 1, 1},
+			Builtins:      []ir.Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+			Body:          body,
+		}},
+	}
+}
+
+func TestDiagnostics(t *testing.T) {
+	rw := ir.Binding{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.ReadWrite, Name: "dst", Type: ir.Array{Elem: ir.F32}}
+	ro := ir.Binding{Group: 0, Binding: 1, Space: ir.Storage, Access: ir.Read, Name: "src", Type: ir.Array{Elem: ir.F32}}
+	uni := ir.Binding{Group: 0, Binding: 2, Space: ir.Uniform, Name: "cfg", Type: ir.F32}
+
+	cases := []struct {
+		name string
+		mod  *ir.Module
+		want string // substring expected in the joined diagnostics
+	}{
+		{
+			"undefined name",
+			kernel(nil, ir.Let{Name: "x", Value: ir.Name{Name: "missing"}}),
+			`undefined name "missing"`,
+		},
+		{
+			"assign to let",
+			kernel(nil,
+				ir.Let{Name: "x", Value: ir.Lit{Text: "0"}},
+				ir.Assign{Target: ir.Name{Name: "x"}, Value: ir.Lit{Text: "1"}}),
+			`cannot assign to "x"`,
+		},
+		{
+			"assign to read-only storage",
+			kernel([]ir.Binding{ro},
+				ir.Assign{Target: ir.Index{E: ir.Name{Name: "src"}, Idx: ir.Lit{Text: "0"}}, Value: ir.Lit{Text: "1"}}),
+			`cannot assign to "src"`,
+		},
+		{
+			"assign to uniform",
+			kernel([]ir.Binding{uni},
+				ir.Assign{Target: ir.Name{Name: "cfg"}, Value: ir.Lit{Text: "1"}}),
+			`cannot assign to "cfg"`,
+		},
+		{
+			"write to read_write storage is ok via index",
+			kernel([]ir.Binding{rw},
+				ir.Assign{Target: ir.Index{E: ir.Name{Name: "dst"}, Idx: ir.Lit{Text: "0"}}, Value: ir.Lit{Text: "1"}}),
+			"", // valid
+		},
+		{
+			"addr-of a local",
+			kernel(nil,
+				ir.Var{Name: "x", Init: ir.Lit{Text: "0"}},
+				ir.Let{Name: "p", Value: ir.AddrOf{E: ir.Name{Name: "x"}}}),
+			`cannot take the address of "x"`,
+		},
+		{
+			"addr-of storage is ok",
+			kernel([]ir.Binding{ro},
+				ir.Let{Name: "n", Value: ir.Call{Func: "arrayLength", Args: []ir.Expr{ir.AddrOf{E: ir.Name{Name: "src"}}}}}),
+			"",
+		},
+		{
+			"duplicate binding slot",
+			&ir.Module{Bindings: []ir.Binding{
+				{Group: 0, Binding: 0, Space: ir.Uniform, Name: "a", Type: ir.F32},
+				{Group: 0, Binding: 0, Space: ir.Uniform, Name: "b", Type: ir.F32},
+			}},
+			"reuses @group(0) @binding(0)",
+		},
+		{
+			"unknown named type",
+			&ir.Module{Bindings: []ir.Binding{
+				{Group: 0, Binding: 0, Space: ir.Uniform, Name: "cfg", Type: ir.Named{Name: "Nope"}},
+			}},
+			`unknown type "Nope"`,
+		},
+		{
+			"call arity",
+			kernel(nil, ir.Let{Name: "d", Value: ir.Call{Func: "dot", Args: []ir.Expr{ir.Lit{Text: "1"}}}}),
+			"dot expects 2 argument(s), got 1",
+		},
+		{
+			"redeclared local",
+			kernel(nil,
+				ir.Let{Name: "x", Value: ir.Lit{Text: "0"}},
+				ir.Let{Name: "x", Value: ir.Lit{Text: "1"}}),
+			`"x" is already declared in this block`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Errors(Check(tc.mod))
+			if tc.want == "" {
+				if got != nil {
+					t.Fatalf("expected valid, got:\n%v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("expected diagnostic containing %q, got none", tc.want)
+			}
+			if !strings.Contains(got.Error(), tc.want) {
+				t.Fatalf("expected diagnostic containing %q, got:\n%v", tc.want, got)
+			}
+		})
+	}
+}

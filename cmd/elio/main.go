@@ -15,11 +15,12 @@ import (
 	"m31labs.dev/elio/emit/wgsl"
 	"m31labs.dev/elio/ir"
 	"m31labs.dev/elio/parse"
+	"m31labs.dev/elio/sema"
 )
 
 const usage = `usage:
   elio emit <wgsl|glsl|metal> <file.elio>   emit shader source to stdout
-  elio check <file.elio>                    parse-check the source`
+  elio check <file.elio>                    parse + semantic-check the source`
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -40,7 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "usage: elio check <file.elio>")
 			return 2
 		}
-		if _, err := parseFile(args[1]); err != nil {
+		if _, err := loadModule(args[1]); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -52,18 +53,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func parseFile(path string) (*ir.Module, error) {
+// loadModule parses path and runs the semantic checker, so both `check` and
+// `emit` reject invalid source before any backend sees it.
+func loadModule(path string) (*ir.Module, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	// House-style front-end: the grammargen/gotreesitter grammar (shared with
 	// Selena and Manta). The hand-written parser remains the test oracle.
-	return parse.ParseTree(string(src))
+	mod, err := parse.ParseTree(string(src))
+	if err != nil {
+		return nil, err
+	}
+	if err := sema.Errors(sema.Check(mod)); err != nil {
+		return nil, err
+	}
+	return mod, nil
 }
 
 func emit(target, path string, stdout, stderr io.Writer) int {
-	mod, err := parseFile(path)
+	mod, err := loadModule(path)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
