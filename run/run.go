@@ -498,6 +498,21 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		old := sr.arr[sr.idx]
 		sr.arr[sr.idx] = old + toFloat(add)
 		return old, nil
+	case "min", "max":
+		a, err := ev.eval(c.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		b, err := ev.eval(c.Args[1])
+		if err != nil {
+			return nil, err
+		}
+		// Return the original operand (preserving int64 vs float64) so the
+		// chosen one keeps its type.
+		if (c.Func == "min") == (toFloat(a) <= toFloat(b)) {
+			return a, nil
+		}
+		return b, nil
 	}
 	return nil, fmt.Errorf("run: unsupported call %q", c.Func)
 }

@@ -235,6 +235,26 @@ func TestParticleUpdateEmits(t *testing.T) {
 	}
 }
 
+// TestHiZEmits validates the Hi-Z depth-pyramid downsample across the GPU
+// backends — a uniform dims struct, two storage depth buffers, integer index
+// math, and a 4-way max. Execution is proven in stdlib.
+func TestHiZEmits(t *testing.T) {
+	mod := stdlib.HiZDownsample()
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	validate(t, "naga", "hiz.wgsl", wsrc, func(f string) []string { return []string{f} })
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	validate(t, "glslangValidator", "hiz.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	if _, err := metal.Emit(mod); err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+}
+
 func validate(t *testing.T, bin, fname, src string, args func(string) []string) {
 	t.Helper()
 	path, err := exec.LookPath(bin)
