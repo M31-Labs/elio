@@ -70,7 +70,12 @@ func ElioGrammar() *grammargen.Grammar {
 		s(")"),
 		s("kernel"), field("name", sym("identifier")),
 		s("("), opt(sym("params")), s(")"),
-		field("body", sym("block")),
+		field("body", sym("kernel_body")),
+	))
+	// A kernel body is workgroup-shared declarations (a prefix) then statements.
+	g.Define("kernel_body", seq(s("{"), rep(sym("shared_decl")), rep(sym("statement")), s("}")))
+	g.Define("shared_decl", seq(
+		s("shared"), field("name", sym("identifier")), s(":"), field("type", sym("type")), s(";"),
 	))
 	g.Define("params", seq(sym("param"), rep(seq(s(","), sym("param"))), opt(s(","))))
 	g.Define("param", seq(
@@ -87,7 +92,7 @@ func ElioGrammar() *grammargen.Grammar {
 
 	g.Define("statement", choice(
 		sym("let_stmt"), sym("var_stmt"), sym("return_stmt"),
-		sym("break_stmt"), sym("if_stmt"), sym("for_stmt"), sym("assign_stmt"),
+		sym("break_stmt"), sym("barrier_stmt"), sym("if_stmt"), sym("for_stmt"), sym("assign_stmt"),
 	))
 
 	g.Define("let_stmt", seq(
@@ -101,6 +106,7 @@ func ElioGrammar() *grammargen.Grammar {
 	))
 	g.Define("return_stmt", seq(s("return"), s(";")))
 	g.Define("break_stmt", seq(s("break"), s(";")))
+	g.Define("barrier_stmt", seq(s("barrier"), s(";")))
 	g.Define("if_stmt", seq(
 		s("if"), field("cond", sym("expression")), field("then", sym("block")),
 		opt(seq(s("else"), field("else", choice(sym("if_stmt"), sym("block"))))),

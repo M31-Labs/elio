@@ -398,11 +398,48 @@ func (p *parser) kernel() (ir.Kernel, error) {
 		}
 	}
 	p.next() // )
-	body, err := p.block()
+	shared, body, err := p.kernelBody()
 	if err != nil {
 		return ir.Kernel{}, err
 	}
-	return ir.Kernel{Name: name, WorkgroupSize: ws, Builtins: builtins, Body: body}, nil
+	return ir.Kernel{Name: name, WorkgroupSize: ws, Builtins: builtins, Shared: shared, Body: body}, nil
+}
+
+// kernelBody parses { shared-decls… statements… }: workgroup-shared
+// declarations are a prefix, then the statement body.
+func (p *parser) kernelBody() ([]ir.Shared, []ir.Stmt, error) {
+	if err := p.wantPunct("{"); err != nil {
+		return nil, nil, err
+	}
+	var shared []ir.Shared
+	for p.isIdent("shared") {
+		p.next() // shared
+		name, err := p.wantIdent()
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := p.wantPunct(":"); err != nil {
+			return nil, nil, err
+		}
+		t, err := p.typ()
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := p.wantPunct(";"); err != nil {
+			return nil, nil, err
+		}
+		shared = append(shared, ir.Shared{Name: name, Type: t})
+	}
+	var body []ir.Stmt
+	for !p.isPunct("}") {
+		s, err := p.stmt()
+		if err != nil {
+			return nil, nil, err
+		}
+		body = append(body, s)
+	}
+	p.next() // }
+	return shared, body, nil
 }
 
 func (p *parser) block() ([]ir.Stmt, error) {
@@ -461,6 +498,12 @@ func (p *parser) stmt() (ir.Stmt, error) {
 			return nil, err
 		}
 		return ir.Break{}, nil
+	case p.isIdent("barrier"):
+		p.next()
+		if err := p.wantPunct(";"); err != nil {
+			return nil, err
+		}
+		return ir.Barrier{}, nil
 	case p.isIdent("if"):
 		return p.ifStmt()
 	case p.isIdent("for"):

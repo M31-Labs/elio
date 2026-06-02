@@ -206,11 +206,25 @@ func (w *treeWalker) kernel(n *gts.Node) (ir.Kernel, error) {
 			})
 		}
 	}
-	body, err := w.block(w.field(n, "body"))
-	if err != nil {
-		return ir.Kernel{}, err
+	// The kernel_body separates shared declarations (a prefix) from statements.
+	bodyNode := w.field(n, "body")
+	for i := 0; i < bodyNode.NamedChildCount(); i++ {
+		c := bodyNode.NamedChild(i)
+		switch w.typ(c) {
+		case "shared_decl":
+			t, err := w.typeOf(w.field(c, "type"))
+			if err != nil {
+				return ir.Kernel{}, err
+			}
+			k.Shared = append(k.Shared, ir.Shared{Name: w.text(w.field(c, "name")), Type: t})
+		case "statement":
+			st, err := w.stmt(c.NamedChild(0))
+			if err != nil {
+				return ir.Kernel{}, err
+			}
+			k.Body = append(k.Body, st)
+		}
 	}
-	k.Body = body
 	return k, nil
 }
 
@@ -242,7 +256,7 @@ func (w *treeWalker) block(n *gts.Node) ([]ir.Stmt, error) {
 // `statement` supertype is elided and the concrete node appears directly).
 func (w *treeWalker) maybeStmt(n *gts.Node) (func() (ir.Stmt, error), bool) {
 	switch w.typ(n) {
-	case "let_stmt", "var_stmt", "return_stmt", "break_stmt", "if_stmt", "for_stmt", "assign_stmt":
+	case "let_stmt", "var_stmt", "return_stmt", "break_stmt", "barrier_stmt", "if_stmt", "for_stmt", "assign_stmt":
 		return func() (ir.Stmt, error) { return w.stmt(n) }, true
 	}
 	return nil, false
@@ -262,6 +276,8 @@ func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
 		return ir.Return{}, nil
 	case "break_stmt":
 		return ir.Break{}, nil
+	case "barrier_stmt":
+		return ir.Barrier{}, nil
 	case "if_stmt":
 		return w.ifStmt(n)
 	case "for_stmt":

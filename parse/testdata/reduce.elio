@@ -1,0 +1,18 @@
+@group(0) @binding(0) storage read src: []f32;
+@group(0) @binding(1) storage read_write partials: []f32;
+
+@workgroup(64) kernel reduce(gid: global_invocation_id, lid: local_invocation_id, wid: workgroup_id) {
+  shared scratch: [64]f32;
+  let t = lid.x;
+  scratch[t] = src[gid.x];
+  barrier;
+  for (var s: u32 = 32u; s > 0u; s = s / 2u) {
+    if t < s {
+      scratch[t] = scratch[t] + scratch[t + s];
+    }
+    barrier;
+  }
+  if t == 0u {
+    partials[wid.x] = scratch[0];
+  }
+}

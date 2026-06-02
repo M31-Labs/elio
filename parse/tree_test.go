@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"m31labs.dev/elio/emit/wgsl"
+	"m31labs.dev/elio/ir"
 )
 
 // TestParseTreeMatchesHandWritten is the grammargen front-end proof: the
@@ -36,6 +37,33 @@ func TestParseTreeMatchesHandWritten(t *testing.T) {
 	}
 	if treeWGSL != handWGSL {
 		t.Errorf("grammargen parse emits differently than hand-written\n--- tree ---\n%s\n--- hand ---\n%s", treeWGSL, handWGSL)
+	}
+}
+
+// TestParseTreeReduceEndToEnd pins the workgroup-shared / barrier surface: both
+// parsers must turn reduce.elio into IR that emits identical WGSL to the
+// hand-built ir.WorkgroupReduce() — proving `shared`/`barrier` author end-to-end.
+func TestParseTreeReduceEndToEnd(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("testdata", "reduce.elio"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromTree, err := ParseTree(string(src))
+	if err != nil {
+		t.Fatalf("ParseTree: %v", err)
+	}
+	fromHand, err := Parse(string(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	treeWGSL, _ := wgsl.Emit(fromTree)
+	handWGSL, _ := wgsl.Emit(fromHand)
+	wantWGSL, _ := wgsl.Emit(ir.WorkgroupReduce())
+	if treeWGSL != wantWGSL {
+		t.Errorf("grammargen parse of reduce.elio != hand-built IR\n--- tree ---\n%s\n--- want ---\n%s", treeWGSL, wantWGSL)
+	}
+	if handWGSL != wantWGSL {
+		t.Errorf("hand-written parse of reduce.elio != hand-built IR\n--- hand ---\n%s\n--- want ---\n%s", handWGSL, wantWGSL)
 	}
 }
 
