@@ -26,23 +26,26 @@ import (
 
 // Check validates m and returns every diagnostic it finds (empty == valid).
 func Check(m *ir.Module) []error {
-	c := &checker{structs: map[string]bool{}}
+	c := &checker{structs: map[string]map[string]ir.Type{}}
 
 	// First pass: collect struct names so field/binding types can reference them.
-	for _, s := range m.Structs {
-		if c.structs[s.Name] {
+	for i := range m.Structs {
+		s := &m.Structs[i]
+		if _, dup := c.structs[s.Name]; dup {
 			c.errf("duplicate struct %q", s.Name)
 		}
-		c.structs[s.Name] = true
-	}
-	// Struct fields: no dups, and Named field types resolve.
-	for _, s := range m.Structs {
-		seen := map[string]bool{}
+		fields := map[string]ir.Type{}
 		for _, f := range s.Fields {
-			if seen[f.Name] {
+			if _, dup := fields[f.Name]; dup {
 				c.errf("struct %q: duplicate field %q", s.Name, f.Name)
 			}
-			seen[f.Name] = true
+			fields[f.Name] = f.Type
+		}
+		c.structs[s.Name] = fields
+	}
+	// Field types resolve (Named refs point at declared structs).
+	for _, s := range m.Structs {
+		for _, f := range s.Fields {
 			c.checkType(s.Name, f.Type)
 		}
 	}
@@ -59,7 +62,7 @@ func Check(m *ir.Module) []error {
 		if _, dup := global.syms[b.Name]; dup {
 			c.errf("duplicate binding name %q", b.Name)
 		}
-		global.define(b.Name, bindingKind(b))
+		global.define(b.Name, bindingKind(b), b.Type)
 		c.checkType("binding "+b.Name, b.Type)
 	}
 
@@ -73,7 +76,7 @@ func Check(m *ir.Module) []error {
 				c.errf("kernel %q: duplicate parameter %q", k.Name, bi.Name)
 			}
 			pnames[bi.Name] = true
-			ks.define(bi.Name, kBuiltin)
+			ks.define(bi.Name, kBuiltin, bi.Type)
 		}
 		c.checkBlock(ks, k.Body)
 	}
@@ -115,26 +118,33 @@ func (k symKind) immutableHint() string {
 	return "read-only"
 }
 
+// symInfo is what a name binds to: its mutability kind and, where inferable, its
+// type (nil type == unknown, which suppresses type-dependent checks).
+type symInfo struct {
+	kind symKind
+	typ  ir.Type
+}
+
 type scope struct {
 	parent *scope
-	syms   map[string]symKind
+	syms   map[string]symInfo
 }
 
-func newScope(parent *scope) *scope { return &scope{parent: parent, syms: map[string]symKind{}} }
+func newScope(parent *scope) *scope { return &scope{parent: parent, syms: map[string]symInfo{}} }
 
-func (s *scope) lookup(n string) (symKind, bool) {
+func (s *scope) lookup(n string) (symInfo, bool) {
 	for sc := s; sc != nil; sc = sc.parent {
-		if k, ok := sc.syms[n]; ok {
-			return k, true
+		if si, ok := sc.syms[n]; ok {
+			return si, true
 		}
 	}
-	return 0, false
+	return symInfo{}, false
 }
 
-func (s *scope) define(n string, k symKind) { s.syms[n] = k }
+func (s *scope) define(n string, k symKind, t ir.Type) { s.syms[n] = symInfo{kind: k, typ: t} }
 
 type checker struct {
-	structs map[string]bool
+	structs map[string]map[string]ir.Type // struct name → field name → field type
 	kernel  string
 	errs    []error
 }
@@ -150,7 +160,7 @@ func (c *checker) errf(format string, a ...any) {
 func (c *checker) checkType(where string, t ir.Type) {
 	switch t := t.(type) {
 	case ir.Named:
-		if !c.structs[t.Name] {
+		if _, ok := c.structs[t.Name]; !ok {
 			c.errf("%s: unknown type %q", where, t.Name)
 		}
 	case ir.Array:
@@ -169,13 +179,18 @@ func (c *checker) checkStmt(s *scope, st ir.Stmt) {
 	switch st := st.(type) {
 	case ir.Let:
 		c.checkExpr(s, st.Value)
-		c.declareLocal(s, st.Name, kLet)
+		c.declareLocal(s, st.Name, kLet, c.typeOf(s, st.Value))
 	case ir.Var:
 		c.checkExpr(s, st.Init)
 		if st.Type != nil {
 			c.checkType("var "+st.Name, st.Type)
 		}
-		c.declareLocal(s, st.Name, kVar)
+		// An explicit annotation wins; otherwise infer from the initializer.
+		vt := st.Type
+		if vt == nil {
+			vt = c.typeOf(s, st.Init)
+		}
+		c.declareLocal(s, st.Name, kVar, vt)
 	case ir.Assign:
 		c.checkExpr(s, st.Target)
 		c.checkExpr(s, st.Value)
@@ -205,11 +220,11 @@ func (c *checker) checkStmt(s *scope, st ir.Stmt) {
 	}
 }
 
-func (c *checker) declareLocal(s *scope, name string, k symKind) {
+func (c *checker) declareLocal(s *scope, name string, k symKind, t ir.Type) {
 	if _, dup := s.syms[name]; dup {
 		c.errf("%q is already declared in this block", name)
 	}
-	s.define(name, k)
+	s.define(name, k, t)
 }
 
 func (c *checker) checkExpr(s *scope, e ir.Expr) {
@@ -232,7 +247,7 @@ func (c *checker) checkExpr(s *scope, e ir.Expr) {
 			c.errf("& requires an addressable storage operand")
 			return
 		}
-		if k, found := s.lookup(root); found && k != kStorageRead && k != kStorageRW {
+		if si, found := s.lookup(root); found && si.kind != kStorageRead && si.kind != kStorageRW {
 			c.errf("cannot take the address of %q (& requires a storage buffer)", root)
 		}
 	case ir.Call:
@@ -243,8 +258,14 @@ func (c *checker) checkExpr(s *scope, e ir.Expr) {
 	case ir.Index:
 		c.checkExpr(s, e.E)
 		c.checkExpr(s, e.Idx)
+		if ot := c.typeOf(s, e.E); ot != nil {
+			if _, ok := ot.(ir.Scalar); ok {
+				c.errf("cannot index %s (not an array, vector, or matrix)", typeName(ot))
+			}
+		}
 	case ir.Member:
 		c.checkExpr(s, e.E)
+		c.checkMember(s, e)
 	default:
 		c.errf("unhandled expression %T", e)
 	}
@@ -256,12 +277,12 @@ func (c *checker) checkAssignable(s *scope, target ir.Expr) {
 		c.errf("invalid assignment target")
 		return
 	}
-	k, found := s.lookup(root)
+	si, found := s.lookup(root)
 	if !found {
 		return // undefined name already reported by checkExpr
 	}
-	if k != kVar && k != kStorageRW {
-		c.errf("cannot assign to %q (%s)", root, k.immutableHint())
+	if si.kind != kVar && si.kind != kStorageRW {
+		c.errf("cannot assign to %q (%s)", root, si.kind.immutableHint())
 	}
 }
 

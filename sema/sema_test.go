@@ -24,6 +24,69 @@ func TestValidSamplesPass(t *testing.T) {
 	}
 }
 
+// TestTypeChecks covers the type-aware layer: struct field existence, vector
+// swizzle validity, and indexing non-indexable types.
+func TestTypeChecks(t *testing.T) {
+	// A module with a Params struct (a vec4 + a vec2) bound as a uniform, plus a
+	// vec3 builtin, so member/swizzle/index checks have concrete types to see.
+	mod := func(body ...ir.Stmt) *ir.Module {
+		return &ir.Module{
+			Structs: []ir.Struct{{Name: "Params", Fields: []ir.Field{
+				{Name: "tint", Type: ir.Vec{N: 4, Elem: ir.F32}},
+				{Name: "uv", Type: ir.Vec{N: 2, Elem: ir.F32}},
+			}}},
+			Bindings: []ir.Binding{
+				{Group: 0, Binding: 0, Space: ir.Uniform, Name: "p", Type: ir.Named{Name: "Params"}},
+				{Group: 0, Binding: 1, Space: ir.Uniform, Name: "scale", Type: ir.F32},
+			},
+			Kernels: []ir.Kernel{{
+				Name: "main", WorkgroupSize: [3]int{64, 1, 1},
+				Builtins: []ir.Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+				Body:     body,
+			}},
+		}
+	}
+	cases := []struct {
+		name string
+		body []ir.Stmt
+		want string
+	}{
+		{"good field+swizzle", []ir.Stmt{
+			ir.Let{Name: "a", Value: ir.Member{E: ir.Member{E: ir.Name{Name: "p"}, Field: "tint"}, Field: "xyz"}},
+		}, ""},
+		{"bad struct field", []ir.Stmt{
+			ir.Let{Name: "a", Value: ir.Member{E: ir.Name{Name: "p"}, Field: "tnit"}},
+		}, `struct "Params" has no field "tnit"`},
+		{"swizzle out of range", []ir.Stmt{
+			// gid is vec3; .w (component 3) is out of range
+			ir.Let{Name: "a", Value: ir.Member{E: ir.Name{Name: "gid"}, Field: "w"}},
+		}, `invalid swizzle "w" on vec3u`},
+		{"swizzle on vec2 ok", []ir.Stmt{
+			ir.Let{Name: "a", Value: ir.Member{E: ir.Member{E: ir.Name{Name: "p"}, Field: "uv"}, Field: "yx"}},
+		}, ""},
+		{"index a scalar", []ir.Stmt{
+			ir.Let{Name: "a", Value: ir.Index{E: ir.Name{Name: "scale"}, Idx: ir.Lit{Text: "0"}}},
+		}, "cannot index f32"},
+		{"field of a scalar", []ir.Stmt{
+			ir.Let{Name: "a", Value: ir.Member{E: ir.Name{Name: "scale"}, Field: "x"}},
+		}, `f32 has no field "x"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Errors(Check(mod(tc.body...)))
+			if tc.want == "" {
+				if got != nil {
+					t.Fatalf("expected valid, got:\n%v", got)
+				}
+				return
+			}
+			if got == nil || !strings.Contains(got.Error(), tc.want) {
+				t.Fatalf("expected diagnostic containing %q, got:\n%v", tc.want, got)
+			}
+		})
+	}
+}
+
 // kernel wraps a body in a minimal module with the given bindings for testing.
 func kernel(bindings []ir.Binding, body ...ir.Stmt) *ir.Module {
 	return &ir.Module{
