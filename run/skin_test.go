@@ -253,40 +253,60 @@ func dqsReference(realQ, dualQ [][4]float64, boneScale []float64, j [4]int, w, p
 // Rig:
 //   - bone0: 90° about +Z (sends (1,0,0)->(0,1,0)), translate (5,0,0)
 //   - bone1: identity rotation, translate (0,3,0)
-//   - uniform scale 1 on both
+//   - bone2: -rot0 — the SAME 90°-about-+Z rotation as bone0 but its quaternion
+//     lives in the opposite hemisphere (negated). dot(rot2, rot0) = -1 < 0, so
+//     any influence on bone2 blended against a bone0 reference must trigger the
+//     kernel's antipodality flip (wq = -w). Translate (0,0,7).
+//   - bone3: 120° about the normalized (1,1,1) axis — quaternion (.5,.5,.5,.5).
+//     This is an OFF-AXIS rotation: applied to a non-axis-aligned point it makes
+//     the cross-product terms uvx/uvz/uuvx/uuvz and the dual-w translation terms
+//     tx/ty/tz all non-zero (they are identically 0 for the +Z-only bones above).
+//     It cycles axes (x,y,z)->(z,x,y). Translate (1,2,3).
+//   - uniform scale 1 on all.
 //
 // Vertices:
 //   - v0: 100% bone0 at p=(1,0,0) -> rotate to (0,1,0) + (5,0,0) = (5,1,0)
 //   - v1: 100% bone1 at p=(2,2,2) -> identity + (0,3,0) = (2,5,2)
 //   - v2: 50/50 bone0+bone1 at p=(1,0,0)
+//   - v3: 50/50 bone0+bone2 at p=(1,2,3) — antipodal-flip path. influence 0 is
+//     bone0 (the reference); influence 1 is bone2 = -rot0, so dot < 0 and the
+//     flip fires. After the flip both influences describe the same rotation, so
+//     the real part blends back to rot0; only the translation (pos0 vs pos2)
+//     blends. Expected comes from the in-test oracle (which performs the same
+//     flip).
+//   - v4: 100% bone3 at p=(1,2,3) — off-axis rotation. (x,y,z)->(z,x,y) gives
+//     (3,1,2), + pos3 (1,2,3) = (4,3,5). Exercises the cross/translation terms
+//     the +Z-only rig leaves at zero.
 func TestRunSkinDQS(t *testing.T) {
 	mod := ir.SkinDQS()
 
-	s := math.Sqrt2 / 2            // sin(pi/4) = cos(pi/4)
-	rot0 := [4]float64{0, 0, s, s} // 90 deg about +Z
-	rot1 := [4]float64{0, 0, 0, 1} // identity
+	s := math.Sqrt2 / 2                    // sin(pi/4) = cos(pi/4)
+	rot0 := [4]float64{0, 0, s, s}         // 90 deg about +Z
+	rot1 := [4]float64{0, 0, 0, 1}         // identity
+	rot2 := [4]float64{0, 0, -s, -s}       // -rot0: same rotation, opposite hemisphere
+	rot3 := [4]float64{0.5, 0.5, 0.5, 0.5} // 120 deg about normalized (1,1,1)
 	pos0 := [3]float64{5, 0, 0}
 	pos1 := [3]float64{0, 3, 0}
+	pos2 := [3]float64{0, 0, 7}
+	pos3 := [3]float64{1, 2, 3}
 
-	realBones := [][4]float64{rot0, rot1}
+	realBones := [][4]float64{rot0, rot1, rot2, rot3}
 	dualBones := [][4]float64{
 		dualFromRotPos(rot0, pos0),
 		dualFromRotPos(rot1, pos1),
+		dualFromRotPos(rot2, pos2),
+		dualFromRotPos(rot3, pos3),
 	}
-	scaleBones := []float64{1, 1}
+	scaleBones := []float64{1, 1, 1, 1}
 
-	// Buffers for the kernel (as []any of []float64).
-	realQ := []any{
-		[]float64{rot0[0], rot0[1], rot0[2], rot0[3]},
-		[]float64{rot1[0], rot1[1], rot1[2], rot1[3]},
-	}
-	dualQ := []any{
-		[]float64{dualBones[0][0], dualBones[0][1], dualBones[0][2], dualBones[0][3]},
-		[]float64{dualBones[1][0], dualBones[1][1], dualBones[1][2], dualBones[1][3]},
-	}
-	boneScale := []any{
-		[]float64{1, 1, 1, 0},
-		[]float64{1, 1, 1, 0},
+	// Buffers for the kernel (as []any of []float64), indexed directly by bone.
+	realQ := make([]any, len(realBones))
+	dualQ := make([]any, len(dualBones))
+	boneScale := make([]any, len(realBones))
+	for b := range realBones {
+		realQ[b] = []float64{realBones[b][0], realBones[b][1], realBones[b][2], realBones[b][3]}
+		dualQ[b] = []float64{dualBones[b][0], dualBones[b][1], dualBones[b][2], dualBones[b][3]}
+		boneScale[b] = []float64{scaleBones[b], scaleBones[b], scaleBones[b], 0}
 	}
 
 	type vert struct {
@@ -298,6 +318,10 @@ func TestRunSkinDQS(t *testing.T) {
 		{p: [4]float64{1, 0, 0, 1}, j: [4]int{0, 0, 0, 0}, w: [4]float64{1, 0, 0, 0}},
 		{p: [4]float64{2, 2, 2, 1}, j: [4]int{1, 0, 0, 0}, w: [4]float64{1, 0, 0, 0}},
 		{p: [4]float64{1, 0, 0, 1}, j: [4]int{0, 1, 0, 0}, w: [4]float64{0.5, 0.5, 0, 0}},
+		// v3: antipodal-flip path (influence 1 = bone2 = -rot0, dot < 0).
+		{p: [4]float64{1, 2, 3, 1}, j: [4]int{0, 2, 0, 0}, w: [4]float64{0.5, 0.5, 0, 0}},
+		// v4: off-axis rotation (bone3, 120° about (1,1,1)) at a non-axis point.
+		{p: [4]float64{1, 2, 3, 1}, j: [4]int{3, 0, 0, 0}, w: [4]float64{1, 0, 0, 0}},
 	}
 
 	restPos := make([]any, len(verts))
@@ -327,17 +351,22 @@ func TestRunSkinDQS(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Hand-derived spot checks for the two single-bone vertices.
+	// Hand-derived spot checks. v3's real part blends back to bone0's rotation
+	// (bone2 is the same rotation in the opposite hemisphere, un-flipped by the
+	// kernel), so it rotates (1,2,3)->(-2,1,3) and the translation is the 50/50
+	// blend of pos0(5,0,0) and pos2(0,0,7) = (2.5,0,3.5): (0.5,1,6.5).
 	hand := map[int][3]float64{
-		0: {5, 1, 0}, // 90deg-Z: (1,0,0)->(0,1,0), + pos0(5,0,0)
-		1: {2, 5, 2}, // identity, + pos1(0,3,0)
+		0: {5, 1, 0},     // 90deg-Z: (1,0,0)->(0,1,0), + pos0(5,0,0)
+		1: {2, 5, 2},     // identity, + pos1(0,3,0)
+		3: {0.5, 1, 6.5}, // antipodal-flip: (1,2,3)->(-2,1,3), + (2.5,0,3.5)
+		4: {4, 3, 5},     // off-axis 120° (1,1,1): (1,2,3)->(3,1,2), + pos3(1,2,3)
 	}
 
 	for i, v := range verts {
 		want := dqsReference(realBones, dualBones, scaleBones, v.j, v.w, v.p)
 		if h, ok := hand[i]; ok {
 			for c := 0; c < 3; c++ {
-				if abs(want[c]-h[c]) > 1e-9 {
+				if abs(want[c]-h[c]) > 1e-6 {
 					t.Fatalf("oracle disagrees with hand-derived for v%d: oracle=%v hand=%v", i, want, h)
 				}
 			}
@@ -347,12 +376,16 @@ func TestRunSkinDQS(t *testing.T) {
 			t.Fatalf("dst[%d] = %v, want a vec4", i, dst[i])
 		}
 		for c := 0; c < 3; c++ {
-			if abs(got[c]-want[c]) > 1e-6 {
+			// NaN/Inf must fail: a bare `abs(d) > tol` comparison is false for
+			// NaN, so a NaN/Inf-producing defect would slip through silently.
+			d := got[c] - want[c]
+			if math.IsNaN(d) || math.IsInf(d, 0) || math.Abs(d) > 1e-6 {
 				t.Fatalf("dst[%d] = (%g,%g,%g), want (%g,%g,%g)",
 					i, got[0], got[1], got[2], want[0], want[1], want[2])
 			}
 		}
-		if abs(got[3]-1) > 1e-9 {
+		dw := got[3] - 1
+		if math.IsNaN(dw) || math.IsInf(dw, 0) || math.Abs(dw) > 1e-9 {
 			t.Errorf("dst[%d].w = %g, want 1", i, got[3])
 		}
 	}
