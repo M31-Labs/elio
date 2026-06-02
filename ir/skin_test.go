@@ -18,3 +18,20 @@ func TestSkinLBSModuleShape(t *testing.T) {
 		t.Errorf("bindings = %d, want 5", got)
 	}
 }
+
+// TestSkinDQSModuleShape asserts the dual-quaternion skinning kernel has one
+// entrypoint named "main" and the seven storage bindings of its buffer contract
+// (restPos, joints, weights, realQ, dualQ, boneScale, dst).
+func TestSkinDQSModuleShape(t *testing.T) {
+	mod := SkinDQS()
+
+	if got := len(mod.Kernels); got != 1 {
+		t.Fatalf("kernels = %d, want 1", got)
+	}
+	if got := mod.Kernels[0].Name; got != "main" {
+		t.Errorf("kernel name = %q, want %q", got, "main")
+	}
+	if got := len(mod.Bindings); got != 7 {
+		t.Errorf("bindings = %d, want 7", got)
+	}
+}
