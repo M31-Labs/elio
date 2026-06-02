@@ -1,8 +1,9 @@
 // Package conformance cross-checks Elio kernels across every backend — WGSL
 // (naga), GLSL (glslang→SPIR-V), Metal (structural), and the CPU interpreter
 // (executed) — so the IR, emitters, and interpreter are proven to agree. It
-// covers both flagship kernels: cull (atomics, control flow, swizzles) and
-// ScaleBias (vector arithmetic).
+// covers the flagship kernels — cull (atomics, control flow, swizzles) and
+// ScaleBias (vector arithmetic) — plus the cooperative stdlib primitives
+// (reduce, scan) that use workgroup-shared memory and barriers.
 package conformance
 
 import (
@@ -17,6 +18,7 @@ import (
 	"m31labs.dev/elio/emit/wgsl"
 	"m31labs.dev/elio/ir"
 	"m31labs.dev/elio/run"
+	"m31labs.dev/elio/stdlib"
 )
 
 // TestScaleBiasAllBackends proves the second kernel (vector arithmetic over
@@ -134,6 +136,39 @@ func TestReduceEmits(t *testing.T) {
 		t.Fatalf("metal.Emit: %v", err)
 	}
 	for _, want := range []string{"threadgroup float scratch[64];", "threadgroup_barrier(mem_flags::mem_threadgroup)"} {
+		if !strings.Contains(msrc, want) {
+			t.Errorf("metal missing %q\n%s", want, msrc)
+		}
+	}
+}
+
+// TestScanEmits validates the stdlib workgroup prefix-sum across the GPU
+// backends — a cooperative primitive with shared memory and barriers inside a
+// log-step loop. (Its execution correctness is proven in stdlib by the lockstep
+// interpreter; this guards the emitted source.)
+func TestScanEmits(t *testing.T) {
+	mod := stdlib.Scan()
+
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	if !strings.Contains(wsrc, "var<workgroup> temp") || !strings.Contains(wsrc, "workgroupBarrier()") {
+		t.Errorf("wgsl missing shared/barrier:\n%s", wsrc)
+	}
+	validate(t, "naga", "scan.wgsl", wsrc, func(f string) []string { return []string{f} })
+
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	validate(t, "glslangValidator", "scan.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+
+	msrc, err := metal.Emit(mod)
+	if err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+	for _, want := range []string{"threadgroup uint temp[64];", "threadgroup_barrier(mem_flags::mem_threadgroup)"} {
 		if !strings.Contains(msrc, want) {
 			t.Errorf("metal missing %q\n%s", want, msrc)
 		}
