@@ -86,7 +86,7 @@ func lex(src string) ([]token, error) {
 		default:
 			if i+1 < len(src) {
 				switch src[i : i+2] {
-				case "<=", ">=", "==", "!=":
+				case "<=", ">=", "==", "!=", "+=", "-=", "*=", "/=", "%=":
 					emit(tPunct, src[i:i+2])
 					i += 2
 					continue
@@ -548,14 +548,32 @@ func (p *parser) assignNoSemi() (ir.Assign, error) {
 	if err != nil {
 		return ir.Assign{}, err
 	}
-	if err := p.wantPunct("="); err != nil {
+	op, err := p.assignOp()
+	if err != nil {
 		return ir.Assign{}, err
 	}
 	v, err := p.expr()
 	if err != nil {
 		return ir.Assign{}, err
 	}
-	return ir.Assign{Target: target, Value: v}, nil
+	return ir.Assign{Target: target, Value: v, Op: op}, nil
+}
+
+// assignOp consumes "=" (returning "") or a compound operator like "+="
+// (returning "+"), matching ir.Assign.Op.
+func (p *parser) assignOp() (string, error) {
+	t := p.peek()
+	if t.kind == tPunct {
+		switch t.val {
+		case "=":
+			p.next()
+			return "", nil
+		case "+=", "-=", "*=", "/=", "%=":
+			p.next()
+			return strings.TrimSuffix(t.val, "="), nil
+		}
+	}
+	return "", p.errf("expected assignment operator, got %q", t.val)
 }
 
 func (p *parser) ifStmt() (ir.Stmt, error) {

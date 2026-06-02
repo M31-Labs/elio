@@ -42,7 +42,7 @@ func CullKernel() *Module {
 				For{
 					Init: Var{Name: "p", Type: I32, Init: Lit{"0"}},
 					Cond: Binary{"<", Name{"p"}, Lit{"6"}},
-					Post: Assign{Name{"p"}, Binary{"+", Name{"p"}, Lit{"1"}}},
+					Post: Assign{Target: Name{"p"}, Value: Binary{"+", Name{"p"}, Lit{"1"}}},
 					Body: []Stmt{
 						Let{"plane", Index{Member{Name{"cull"}, "planes"}, Name{"p"}}},
 						If{
@@ -51,7 +51,7 @@ func CullKernel() *Module {
 									Call{"dot", []Expr{Member{Name{"plane"}, "xyz"}, Name{"center"}}},
 									Member{Name{"plane"}, "w"}},
 								Unary{"-", Member{Name{"cull"}, "radius"}}},
-							Then: []Stmt{Assign{Name{"inside"}, Lit{"false"}}, Break{}},
+							Then: []Stmt{Assign{Target: Name{"inside"}, Value: Lit{"false"}}, Break{}},
 						},
 					},
 				},
@@ -59,7 +59,7 @@ func CullKernel() *Module {
 					Cond: Name{"inside"},
 					Then: []Stmt{
 						Let{"slot", Call{"atomicAdd", []Expr{AddrOf{Index{Name{"drawArgs"}, Lit{"1"}}}, Lit{"1u"}}}},
-						Assign{Index{Name{"output"}, Name{"slot"}}, Name{"record"}},
+						Assign{Target: Index{Name{"output"}, Name{"slot"}}, Value: Name{"record"}},
 					},
 				},
 			},
@@ -94,18 +94,18 @@ func WorkgroupReduce() *Module {
 			Body: []Stmt{
 				Let{"t", tid},
 				// scratch[t] = src[gid.x];
-				Assign{scratchAt(Name{"t"}), Index{Name{"src"}, Member{Name{"gid"}, "x"}}},
+				Assign{Target: scratchAt(Name{"t"}), Value: Index{Name{"src"}, Member{Name{"gid"}, "x"}}},
 				Barrier{},
 				For{
 					Init: Var{Name: "s", Type: U32, Init: Lit{"32u"}},
 					Cond: Binary{">", Name{"s"}, Lit{"0u"}},
-					Post: Assign{Name{"s"}, Binary{"/", Name{"s"}, Lit{"2u"}}},
+					Post: Assign{Target: Name{"s"}, Value: Binary{"/", Name{"s"}, Lit{"2u"}}},
 					Body: []Stmt{
 						If{
 							Cond: Binary{"<", Name{"t"}, Name{"s"}},
 							Then: []Stmt{Assign{
-								scratchAt(Name{"t"}),
-								Binary{"+", scratchAt(Name{"t"}), scratchAt(Binary{"+", Name{"t"}, Name{"s"}})},
+								Target: scratchAt(Name{"t"}),
+								Value:  Binary{"+", scratchAt(Name{"t"}), scratchAt(Binary{"+", Name{"t"}, Name{"s"}})},
 							}},
 						},
 						Barrier{},
@@ -114,7 +114,7 @@ func WorkgroupReduce() *Module {
 				// if t == 0u { partials[wid.x] = scratch[0]; }
 				If{
 					Cond: Binary{"==", Name{"t"}, Lit{"0u"}},
-					Then: []Stmt{Assign{Index{Name{"partials"}, Member{Name{"wid"}, "x"}}, scratchAt(Lit{"0"})}},
+					Then: []Stmt{Assign{Target: Index{Name{"partials"}, Member{Name{"wid"}, "x"}}, Value: scratchAt(Lit{"0"})}},
 				},
 			},
 		}},

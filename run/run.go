@@ -229,6 +229,15 @@ func (ev *evaluator) execStmt(s ir.Stmt) (flow, error) {
 		if err != nil {
 			return flowNormal, err
 		}
+		if x.Op != "" { // compound assignment: target = target Op value
+			cur, err := ev.eval(x.Target)
+			if err != nil {
+				return flowNormal, err
+			}
+			if v, err = binop(x.Op, cur, v); err != nil {
+				return flowNormal, err
+			}
+		}
 		if err := ev.assign(x.Target, v); err != nil {
 			return flowNormal, err
 		}

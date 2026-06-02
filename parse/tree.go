@@ -314,7 +314,16 @@ func (w *treeWalker) assignInner(n *gts.Node) (ir.Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ir.Assign{Target: target, Value: value}, nil
+	return ir.Assign{Target: target, Value: value, Op: compoundOp(w.text(w.field(n, "op")))}, nil
+}
+
+// compoundOp maps an assignment operator token to ir.Assign.Op: "=" → "" (plain
+// assign), "+=" → "+", and so on.
+func compoundOp(tok string) string {
+	if tok == "=" || tok == "" {
+		return ""
+	}
+	return strings.TrimSuffix(tok, "=")
 }
 
 func (w *treeWalker) ifStmt(n *gts.Node) (ir.Stmt, error) {

@@ -110,3 +110,28 @@ func TestRunReduce(t *testing.T) {
 		t.Errorf("partials[1] = %v, want 6112", partials[1])
 	}
 }
+
+// TestRunCompoundAssign verifies compound assignment evaluates as target = target
+// Op value: (10 + 5) * 2 = 30.
+func TestRunCompoundAssign(t *testing.T) {
+	mod := &ir.Module{
+		Bindings: []ir.Binding{{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.ReadWrite, Name: "acc", Type: ir.Array{Elem: ir.F32}}},
+		Kernels: []ir.Kernel{{
+			Name: "main", WorkgroupSize: [3]int{1, 1, 1},
+			Builtins: []ir.Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+			Body: []ir.Stmt{
+				ir.Var{Name: "x", Init: ir.Lit{Text: "10.0"}},
+				ir.Assign{Target: ir.Name{Name: "x"}, Op: "+", Value: ir.Lit{Text: "5.0"}},
+				ir.Assign{Target: ir.Name{Name: "x"}, Op: "*", Value: ir.Lit{Text: "2.0"}},
+				ir.Assign{Target: ir.Index{E: ir.Name{Name: "acc"}, Idx: ir.Member{E: ir.Name{Name: "gid"}, Field: "x"}}, Value: ir.Name{Name: "x"}},
+			},
+		}},
+	}
+	acc := []float64{0}
+	if err := Run(mod, "main", 1, &Memory{Vars: map[string]any{"acc": acc}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if acc[0] != 30 {
+		t.Errorf("acc[0] = %v, want 30", acc[0])
+	}
+}

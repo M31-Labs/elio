@@ -197,7 +197,7 @@ func (e *emitter) stmt(s ir.Stmt, depth int) error {
 		e.locals[x.Name] = t
 		fmt.Fprintf(&e.b, "%s%s %s = %s;\n", pad, typeName(t), safe(x.Name), e.expr(x.Init))
 	case ir.Assign:
-		fmt.Fprintf(&e.b, "%s%s = %s;\n", pad, e.expr(x.Target), e.expr(x.Value))
+		fmt.Fprintf(&e.b, "%s%s %s= %s;\n", pad, e.expr(x.Target), x.Op, e.expr(x.Value))
 	case ir.Return:
 		fmt.Fprintf(&e.b, "%sreturn;\n", pad)
 	case ir.Break:
@@ -250,7 +250,7 @@ func (e *emitter) inlineStmt(s ir.Stmt) string {
 		e.locals[x.Name] = t
 		return fmt.Sprintf("%s %s = %s", typeName(t), safe(x.Name), e.expr(x.Init))
 	case ir.Assign:
-		return fmt.Sprintf("%s = %s", e.expr(x.Target), e.expr(x.Value))
+		return fmt.Sprintf("%s %s= %s", e.expr(x.Target), x.Op, e.expr(x.Value))
 	case ir.Let:
 		t := e.infer(x.Value)
 		e.locals[x.Name] = t

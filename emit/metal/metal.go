@@ -195,7 +195,7 @@ func emitStmt(b *strings.Builder, s ir.Stmt, depth int) error {
 	case ir.Var:
 		fmt.Fprintf(b, "%s%s;\n", pad, varDecl(x))
 	case ir.Assign:
-		fmt.Fprintf(b, "%s%s = %s;\n", pad, expr(x.Target), expr(x.Value))
+		fmt.Fprintf(b, "%s%s %s= %s;\n", pad, expr(x.Target), x.Op, expr(x.Value))
 	case ir.Return:
 		fmt.Fprintf(b, "%sreturn;\n", pad)
 	case ir.Break:
@@ -242,7 +242,7 @@ func stmtInline(s ir.Stmt) string {
 	case ir.Var:
 		return varDecl(x)
 	case ir.Assign:
-		return fmt.Sprintf("%s = %s", expr(x.Target), expr(x.Value))
+		return fmt.Sprintf("%s %s= %s", expr(x.Target), x.Op, expr(x.Value))
 	case ir.Let:
 		return fmt.Sprintf("auto %s = %s", x.Name, expr(x.Value))
 	}

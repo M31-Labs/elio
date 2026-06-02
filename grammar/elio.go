@@ -120,8 +120,14 @@ func ElioGrammar() *grammargen.Grammar {
 	))
 	g.Define("assign_stmt", seq(sym("assign_inner"), s(";")))
 	g.Define("assign_inner", seq(
-		field("target", sym("expression")), s("="), field("value", sym("expression")),
+		field("target", sym("expression")),
+		field("op", sym("assign_op")),
+		field("value", sym("expression")),
 	))
+	// One lexed token for "=" and the compound forms, rather than a 6-way choice
+	// of string literals — the choice grows the parser state enough to tip a
+	// reduce over grammargen's LALR-merge threshold (see package doc).
+	g.Define("assign_op", grammargen.Token(grammargen.Pat(`[-+*/%]?=`)))
 
 	// --- expression tower: binary > unary > postfix > primary ---
 	g.Define("expression", choice(

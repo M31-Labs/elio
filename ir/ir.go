@@ -144,10 +144,12 @@ type Var struct {
 	Init Expr
 }
 
-// Assign is Target = Value;
+// Assign is Target = Value; or a compound assignment Target Op= Value. Op is ""
+// for a plain "=", or one of "+","-","*","/","%" for "+=","-=","*=","/=","%=".
 type Assign struct {
 	Target Expr
 	Value  Expr
+	Op     string
 }
 
 // If is if (Cond) { Then } [else { Else }].
