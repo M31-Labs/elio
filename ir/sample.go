@@ -67,6 +67,60 @@ func CullKernel() *Module {
 	}
 }
 
+// WorkgroupReduce returns a tree sum-reduction: each 64-wide workgroup loads its
+// slice of src into shared memory, then halves a stride to sum it cooperatively,
+// writing one partial per workgroup. It is the first Elio kernel that is NOT
+// embarrassingly parallel — it exercises workgroup-shared memory and barriers
+// (in straight-line code and inside a loop), the primitives reductions, scans,
+// and tile-based culling are built from. The CPU fallback cannot run it (it has
+// no notion of a cooperating workgroup); the GPU backends are its proof.
+func WorkgroupReduce() *Module {
+	tid := Member{Name{"lid"}, "x"} // local invocation index within the workgroup
+	scratchAt := func(i Expr) Expr { return Index{Name{"scratch"}, i} }
+	return &Module{
+		Bindings: []Binding{
+			{Group: 0, Binding: 0, Space: Storage, Access: Read, Name: "src", Type: Array{Elem: F32}},
+			{Group: 0, Binding: 1, Space: Storage, Access: ReadWrite, Name: "partials", Type: Array{Elem: F32}},
+		},
+		Kernels: []Kernel{{
+			Name:          "reduce",
+			WorkgroupSize: [3]int{64, 1, 1},
+			Builtins: []Builtin{
+				{Name: "gid", Builtin: "global_invocation_id", Type: Vec{3, U32}},
+				{Name: "lid", Builtin: "local_invocation_id", Type: Vec{3, U32}},
+				{Name: "wid", Builtin: "workgroup_id", Type: Vec{3, U32}},
+			},
+			Shared: []Shared{{Name: "scratch", Type: Array{Elem: F32, Len: 64}}},
+			Body: []Stmt{
+				Let{"t", tid},
+				// scratch[t] = src[gid.x];
+				Assign{scratchAt(Name{"t"}), Index{Name{"src"}, Member{Name{"gid"}, "x"}}},
+				Barrier{},
+				For{
+					Init: Var{Name: "s", Type: U32, Init: Lit{"32u"}},
+					Cond: Binary{">", Name{"s"}, Lit{"0u"}},
+					Post: Assign{Name{"s"}, Binary{"/", Name{"s"}, Lit{"2u"}}},
+					Body: []Stmt{
+						If{
+							Cond: Binary{"<", Name{"t"}, Name{"s"}},
+							Then: []Stmt{Assign{
+								scratchAt(Name{"t"}),
+								Binary{"+", scratchAt(Name{"t"}), scratchAt(Binary{"+", Name{"t"}, Name{"s"}})},
+							}},
+						},
+						Barrier{},
+					},
+				},
+				// if t == 0u { partials[wid.x] = scratch[0]; }
+				If{
+					Cond: Binary{"==", Name{"t"}, Lit{"0u"}},
+					Then: []Stmt{Assign{Index{Name{"partials"}, Member{Name{"wid"}, "x"}}, scratchAt(Lit{"0"})}},
+				},
+			},
+		}},
+	}
+}
+
 // ScaleBias returns a second, structurally different kernel —
 // dst[i] = src[i] * params.scale + params.bias over vec4 buffers — to prove the
 // IR, emitters, and CPU interpreter generalize beyond cull. It exercises vector

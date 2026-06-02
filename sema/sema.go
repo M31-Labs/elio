@@ -78,6 +78,13 @@ func Check(m *ir.Module) []error {
 			pnames[bi.Name] = true
 			ks.define(bi.Name, kBuiltin, bi.Type)
 		}
+		for _, sh := range k.Shared {
+			if _, dup := ks.syms[sh.Name]; dup {
+				c.errf("duplicate shared variable %q", sh.Name)
+			}
+			c.checkType("shared "+sh.Name, sh.Type)
+			ks.define(sh.Name, kShared, sh.Type)
+		}
 		c.checkBlock(ks, k.Body)
 	}
 	return c.errs
@@ -92,6 +99,7 @@ const (
 	kUniform
 	kStorageRead
 	kStorageRW
+	kShared // workgroup-shared variable: mutable, but not a storage buffer (no &)
 )
 
 func bindingKind(b ir.Binding) symKind {
@@ -211,7 +219,7 @@ func (c *checker) checkStmt(s *scope, st ir.Stmt) {
 			c.checkStmt(fs, st.Post)
 		}
 		c.checkBlock(fs, st.Body)
-	case ir.Return, ir.Break:
+	case ir.Return, ir.Break, ir.Barrier:
 		// no-op
 	case ir.Do:
 		c.checkExpr(s, st.Expr)
@@ -281,7 +289,7 @@ func (c *checker) checkAssignable(s *scope, target ir.Expr) {
 	if !found {
 		return // undefined name already reported by checkExpr
 	}
-	if si.kind != kVar && si.kind != kStorageRW {
+	if si.kind != kVar && si.kind != kStorageRW && si.kind != kShared {
 		c.errf("cannot assign to %q (%s)", root, si.kind.immutableHint())
 	}
 }

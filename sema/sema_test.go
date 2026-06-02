@@ -15,6 +15,7 @@ func TestValidSamplesPass(t *testing.T) {
 	}{
 		{"cull", ir.CullKernel()},
 		{"scalebias", ir.ScaleBias()},
+		{"reduce", ir.WorkgroupReduce()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if errs := Check(tc.mod); len(errs) != 0 {
@@ -146,6 +147,19 @@ func TestDiagnostics(t *testing.T) {
 				ir.Var{Name: "x", Init: ir.Lit{Text: "0"}},
 				ir.Let{Name: "p", Value: ir.AddrOf{E: ir.Name{Name: "x"}}}),
 			`cannot take the address of "x"`,
+		},
+		{
+			"shared var is assignable; addr-of shared is not",
+			&ir.Module{Kernels: []ir.Kernel{{
+				Name: "main", WorkgroupSize: [3]int{64, 1, 1},
+				Builtins: []ir.Builtin{{Name: "lid", Builtin: "local_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+				Shared:   []ir.Shared{{Name: "tile", Type: ir.Array{Elem: ir.F32, Len: 64}}},
+				Body: []ir.Stmt{
+					ir.Assign{Target: ir.Index{E: ir.Name{Name: "tile"}, Idx: ir.Member{E: ir.Name{Name: "lid"}, Field: "x"}}, Value: ir.Lit{Text: "0"}},
+					ir.Let{Name: "p", Value: ir.AddrOf{E: ir.Name{Name: "tile"}}},
+				},
+			}}},
+			`cannot take the address of "tile"`,
 		},
 		{
 			"addr-of storage is ok",

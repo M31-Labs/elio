@@ -100,11 +100,21 @@ type Builtin struct {
 	Type    Type
 }
 
+// Shared is a workgroup-shared variable: one instance per workgroup, visible to
+// every invocation in it (var<workgroup> in WGSL, shared in GLSL, threadgroup in
+// Metal). It is what reductions, scans, and tile-based algorithms need — the
+// state a workgroup cooperates through, paired with Barrier.
+type Shared struct {
+	Name string
+	Type Type
+}
+
 // Kernel is a compute entrypoint with a workgroup size and a statement body.
 type Kernel struct {
 	Name          string
 	WorkgroupSize [3]int
 	Builtins      []Builtin
+	Shared        []Shared // workgroup-shared declarations
 	Body          []Stmt
 }
 
@@ -164,14 +174,20 @@ type Break struct{}
 // Do evaluates Expr for its side effect: Expr;
 type Do struct{ Expr Expr }
 
-func (Let) isStmt()    {}
-func (Var) isStmt()    {}
-func (Assign) isStmt() {}
-func (If) isStmt()     {}
-func (For) isStmt()    {}
-func (Return) isStmt() {}
-func (Break) isStmt()  {}
-func (Do) isStmt()     {}
+// Barrier is a workgroup control barrier: every invocation in the workgroup must
+// reach it before any proceeds, and shared writes before it are visible after.
+// It must sit in uniform control flow (all invocations reach it).
+type Barrier struct{}
+
+func (Let) isStmt()     {}
+func (Var) isStmt()     {}
+func (Assign) isStmt()  {}
+func (If) isStmt()      {}
+func (For) isStmt()     {}
+func (Return) isStmt()  {}
+func (Break) isStmt()   {}
+func (Do) isStmt()      {}
+func (Barrier) isStmt() {}
 
 // --- Expressions ---
 

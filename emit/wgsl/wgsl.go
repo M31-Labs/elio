@@ -25,6 +25,16 @@ func Emit(m *ir.Module) (string, error) {
 	if len(m.Bindings) > 0 {
 		b.WriteString("\n")
 	}
+	shared := false
+	for _, k := range m.Kernels {
+		for _, sh := range k.Shared {
+			fmt.Fprintf(&b, "var<workgroup> %s : %s;\n", sh.Name, typeName(sh.Type))
+			shared = true
+		}
+	}
+	if shared {
+		b.WriteString("\n")
+	}
 	for i, k := range m.Kernels {
 		if i > 0 {
 			b.WriteString("\n")
@@ -89,6 +99,8 @@ func emitStmt(b *strings.Builder, s ir.Stmt, depth int) error {
 		fmt.Fprintf(b, "%sreturn;\n", pad)
 	case ir.Break:
 		fmt.Fprintf(b, "%sbreak;\n", pad)
+	case ir.Barrier:
+		fmt.Fprintf(b, "%sworkgroupBarrier();\n", pad)
 	case ir.Do:
 		fmt.Fprintf(b, "%s%s;\n", pad, expr(x.Expr))
 	case ir.If:

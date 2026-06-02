@@ -102,6 +102,44 @@ func TestCullAllBackends(t *testing.T) {
 	}
 }
 
+// TestReduceEmits validates the workgroup tree-reduction — Elio's first
+// non-embarrassingly-parallel kernel — across the GPU backends. It is the proof
+// for workgroup-shared memory and barriers: naga enforces that workgroupBarrier
+// sits in uniform control flow, and glslang checks the shared/barrier GLSL. The
+// CPU fallback intentionally cannot run it (run.Run rejects shared memory), so
+// this kernel is GPU-only.
+func TestReduceEmits(t *testing.T) {
+	mod := ir.WorkgroupReduce()
+
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	if !strings.Contains(wsrc, "var<workgroup> scratch") || !strings.Contains(wsrc, "workgroupBarrier()") {
+		t.Errorf("wgsl missing shared/barrier:\n%s", wsrc)
+	}
+	validate(t, "naga", "reduce.wgsl", wsrc, func(f string) []string { return []string{f} })
+
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	if !strings.Contains(gsrc, "shared float scratch[64];") || !strings.Contains(gsrc, "barrier();") {
+		t.Errorf("glsl missing shared/barrier:\n%s", gsrc)
+	}
+	validate(t, "glslangValidator", "reduce.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+
+	msrc, err := metal.Emit(mod)
+	if err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+	for _, want := range []string{"threadgroup float scratch[64];", "threadgroup_barrier(mem_flags::mem_threadgroup)"} {
+		if !strings.Contains(msrc, want) {
+			t.Errorf("metal missing %q\n%s", want, msrc)
+		}
+	}
+}
+
 func validate(t *testing.T, bin, fname, src string, args func(string) []string) {
 	t.Helper()
 	path, err := exec.LookPath(bin)

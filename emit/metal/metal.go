@@ -66,6 +66,15 @@ func emitKernel(b *strings.Builder, m *ir.Module, k ir.Kernel) error {
 	}
 
 	fmt.Fprintf(b, "kernel void %s(\n    %s) {\n", k.Name, strings.Join(args, ",\n    "))
+	// Metal threadgroup memory is declared function-local, as the first body
+	// statements (WGSL/GLSL hoist the equivalent to module scope).
+	for _, sh := range k.Shared {
+		if arr, ok := sh.Type.(ir.Array); ok && arr.Len > 0 {
+			fmt.Fprintf(b, "  threadgroup %s %s[%d];\n", typeName(arr.Elem), sh.Name, arr.Len)
+		} else {
+			fmt.Fprintf(b, "  threadgroup %s %s;\n", typeName(sh.Type), sh.Name)
+		}
+	}
 	for _, s := range k.Body {
 		if err := emitStmt(b, s, 1); err != nil {
 			return err
@@ -191,6 +200,8 @@ func emitStmt(b *strings.Builder, s ir.Stmt, depth int) error {
 		fmt.Fprintf(b, "%sreturn;\n", pad)
 	case ir.Break:
 		fmt.Fprintf(b, "%sbreak;\n", pad)
+	case ir.Barrier:
+		fmt.Fprintf(b, "%sthreadgroup_barrier(mem_flags::mem_threadgroup);\n", pad)
 	case ir.Do:
 		fmt.Fprintf(b, "%s%s;\n", pad, expr(x.Expr))
 	case ir.If:

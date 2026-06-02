@@ -59,6 +59,11 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 	if k == nil {
 		return fmt.Errorf("run: kernel %q not found", kernelName)
 	}
+	// The CPU fallback runs invocations independently, so it cannot model a
+	// cooperating workgroup (shared memory + barriers need lockstep execution).
+	if len(k.Shared) > 0 {
+		return fmt.Errorf("run: kernel %q uses workgroup-shared memory, which the CPU fallback does not support", kernelName)
+	}
 	for gid := 0; gid < count; gid++ {
 		ev := &evaluator{mem: mem, locals: map[string]any{}}
 		for _, bi := range k.Builtins {
@@ -127,6 +132,8 @@ func (ev *evaluator) execStmt(s ir.Stmt) (flow, error) {
 		return flowReturn, nil
 	case ir.Break:
 		return flowBreak, nil
+	case ir.Barrier:
+		return flowNormal, fmt.Errorf("run: workgroup barrier requires lockstep execution, unsupported in the CPU fallback")
 	case ir.Do:
 		_, err := ev.eval(x.Expr)
 		return flowNormal, err

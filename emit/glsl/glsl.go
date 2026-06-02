@@ -70,6 +70,20 @@ func (e *emitter) emit() (string, error) {
 	if len(e.m.Bindings) > 0 {
 		e.b.WriteString("\n")
 	}
+	shared := false
+	for _, k := range e.m.Kernels {
+		for _, sh := range k.Shared {
+			if arr, ok := sh.Type.(ir.Array); ok && arr.Len > 0 {
+				fmt.Fprintf(&e.b, "shared %s %s[%d];\n", typeName(arr.Elem), safe(sh.Name), arr.Len)
+			} else {
+				fmt.Fprintf(&e.b, "shared %s %s;\n", typeName(sh.Type), safe(sh.Name))
+			}
+			shared = true
+		}
+	}
+	if shared {
+		e.b.WriteString("\n")
+	}
 	for i, k := range e.m.Kernels {
 		if i > 0 {
 			e.b.WriteString("\n")
@@ -188,6 +202,9 @@ func (e *emitter) stmt(s ir.Stmt, depth int) error {
 		fmt.Fprintf(&e.b, "%sreturn;\n", pad)
 	case ir.Break:
 		fmt.Fprintf(&e.b, "%sbreak;\n", pad)
+	case ir.Barrier:
+		// Flush shared writes, then synchronize execution.
+		fmt.Fprintf(&e.b, "%smemoryBarrierShared();\n%sbarrier();\n", pad, pad)
 	case ir.Do:
 		fmt.Fprintf(&e.b, "%s%s;\n", pad, e.expr(x.Expr))
 	case ir.If:
