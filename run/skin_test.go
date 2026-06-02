@@ -424,6 +424,10 @@ func TestRunMemberAssign(t *testing.T) {
 	if abs(got[0]-7) > 1e-9 {
 		t.Fatalf("dst[0].x = %v, want 7", got)
 	}
+	// The other lanes must be untouched (member-assign writes only .x).
+	if abs(got[1]) > 1e-9 || abs(got[2]) > 1e-9 || abs(got[3]) > 1e-9 {
+		t.Fatalf("member-assign clobbered other lanes: %v, want {7,0,0,0}", got)
+	}
 }
 
 // TestRunSqrt exercises the sqrt builtin via SqrtKernel: out = p * |p|.
