@@ -175,6 +175,25 @@ func TestScanEmits(t *testing.T) {
 	}
 }
 
+// TestCompactEmits validates the stdlib stream-compaction (scan + scatter) on
+// the GPU backends. Its execution correctness is proven in stdlib.
+func TestCompactEmits(t *testing.T) {
+	mod := stdlib.Compact()
+	wsrc, err := wgsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("wgsl.Emit: %v", err)
+	}
+	validate(t, "naga", "compact.wgsl", wsrc, func(f string) []string { return []string{f} })
+	gsrc, err := glsl.Emit(mod)
+	if err != nil {
+		t.Fatalf("glsl.Emit: %v", err)
+	}
+	validate(t, "glslangValidator", "compact.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	if _, err := metal.Emit(mod); err != nil {
+		t.Fatalf("metal.Emit: %v", err)
+	}
+}
+
 func validate(t *testing.T, bin, fname, src string, args func(string) []string) {
 	t.Helper()
 	path, err := exec.LookPath(bin)
