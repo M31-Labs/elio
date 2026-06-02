@@ -83,3 +83,30 @@ func TestRunCull(t *testing.T) {
 		t.Errorf("vertexCount = %v, want 36", drawArgs[0])
 	}
 }
+
+// TestRunReduce executes the workgroup tree-reduction in lockstep across two
+// 64-wide workgroups over src[i] = i, and asserts each workgroup's partial sum.
+// This is the proof that the CPU fallback now runs cooperating workgroups
+// (shared memory + barriers), not only embarrassingly-parallel kernels — and,
+// under -race, that the kernel's shared access is correctly synchronized.
+func TestRunReduce(t *testing.T) {
+	mod := ir.WorkgroupReduce()
+	const n = 128 // two workgroups of 64
+	src := make([]float64, n)
+	for i := range src {
+		src[i] = float64(i)
+	}
+	partials := make([]float64, n/64)
+	mem := &Memory{Vars: map[string]any{"src": src, "partials": partials}}
+
+	if err := Run(mod, "reduce", n, mem); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// workgroup 0 sums 0..63 = 2016; workgroup 1 sums 64..127 = 6112.
+	if partials[0] != 2016 {
+		t.Errorf("partials[0] = %v, want 2016", partials[0])
+	}
+	if partials[1] != 6112 {
+		t.Errorf("partials[1] = %v, want 6112", partials[1])
+	}
+}

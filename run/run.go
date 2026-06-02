@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"m31labs.dev/elio/ir"
 )
@@ -59,32 +60,135 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 	if k == nil {
 		return fmt.Errorf("run: kernel %q not found", kernelName)
 	}
-	// The CPU fallback runs invocations independently, so it cannot model a
-	// cooperating workgroup (shared memory + barriers need lockstep execution).
-	if len(k.Shared) > 0 {
-		return fmt.Errorf("run: kernel %q uses workgroup-shared memory, which the CPU fallback does not support", kernelName)
+	total := k.WorkgroupSize[0] * k.WorkgroupSize[1] * k.WorkgroupSize[2]
+	if total < 1 {
+		total = 1
 	}
-	for gid := 0; gid < count; gid++ {
-		ev := &evaluator{mem: mem, locals: map[string]any{}}
-		for _, bi := range k.Builtins {
-			if bi.Builtin == "global_invocation_id" {
-				ev.locals[bi.Name] = []float64{float64(gid), 0, 0}
+	// Embarrassingly-parallel kernels (no shared memory) run one invocation at a
+	// time. Kernels with shared memory + barriers need a cooperating workgroup,
+	// so each workgroup's invocations run in lockstep goroutines synchronized by
+	// a barrier — the CPU fallback then executes (and the race detector audits)
+	// reductions and scans, not just maps.
+	if len(k.Shared) == 0 {
+		for gid := 0; gid < count; gid++ {
+			ev := &evaluator{mem: mem, locals: map[string]any{}}
+			setBuiltins(ev, k, gid, total)
+			if _, err := ev.execBlock(k.Body); err != nil {
+				return fmt.Errorf("run: invocation %d: %w", gid, err)
 			}
 		}
-		if _, err := ev.execBlock(k.Body); err != nil {
-			return fmt.Errorf("run: invocation %d: %w", gid, err)
+		return nil
+	}
+
+	if count%total != 0 {
+		return fmt.Errorf("run: shared-memory kernel needs count (%d) to be a multiple of the workgroup size (%d)", count, total)
+	}
+	for wg := 0; wg < count/total; wg++ {
+		shared := initShared(k.Shared)
+		bar := newBarrier(total)
+		var wgrp sync.WaitGroup
+		errs := make([]error, total)
+		for l := 0; l < total; l++ {
+			wgrp.Add(1)
+			go func(l int) {
+				defer wgrp.Done()
+				gid := wg*total + l
+				ev := &evaluator{mem: mem, locals: map[string]any{}, shared: shared, barrier: bar}
+				setBuiltins(ev, k, gid, total)
+				_, errs[l] = ev.execBlock(k.Body)
+			}(l)
+		}
+		wgrp.Wait()
+		for l, err := range errs {
+			if err != nil {
+				return fmt.Errorf("run: workgroup %d lane %d: %w", wg, l, err)
+			}
 		}
 	}
 	return nil
 }
 
+// setBuiltins binds a kernel's @builtin inputs for the invocation at global
+// index gid, deriving the local index and workgroup id from the (1-D) workgroup
+// size — so local_invocation_id and workgroup_id are available too, not only
+// global_invocation_id.
+func setBuiltins(ev *evaluator, k *ir.Kernel, gid, total int) {
+	lid := gid % total
+	wid := gid / total
+	for _, bi := range k.Builtins {
+		switch bi.Builtin {
+		case "global_invocation_id":
+			ev.locals[bi.Name] = []float64{float64(gid), 0, 0}
+		case "local_invocation_id":
+			ev.locals[bi.Name] = []float64{float64(lid), 0, 0}
+		case "workgroup_id":
+			ev.locals[bi.Name] = []float64{float64(wid), 0, 0}
+		case "local_invocation_index":
+			ev.locals[bi.Name] = float64(lid)
+		}
+	}
+}
+
+// initShared allocates a workgroup's shared store: one zeroed slice per array
+// declaration (scalars start at zero), shared by every lane in the workgroup.
+func initShared(decls []ir.Shared) map[string]any {
+	shared := map[string]any{}
+	for _, sh := range decls {
+		if arr, ok := sh.Type.(ir.Array); ok && arr.Len > 0 {
+			shared[sh.Name] = make([]float64, arr.Len)
+		} else {
+			shared[sh.Name] = float64(0)
+		}
+	}
+	return shared
+}
+
+// barrier is a single-use-per-phase cyclic barrier for the lanes of one
+// workgroup. wait blocks until all `n` lanes arrive, then releases them
+// together; its mutex establishes the happens-before that makes shared writes
+// before a barrier visible to reads after it.
+type barrier struct {
+	mu         sync.Mutex
+	cond       *sync.Cond
+	n          int
+	count      int
+	generation int
+}
+
+func newBarrier(n int) *barrier {
+	b := &barrier{n: n}
+	b.cond = sync.NewCond(&b.mu)
+	return b
+}
+
+func (b *barrier) wait() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	gen := b.generation
+	b.count++
+	if b.count == b.n {
+		b.count = 0
+		b.generation++
+		b.cond.Broadcast()
+		return
+	}
+	for gen == b.generation {
+		b.cond.Wait()
+	}
+}
+
 type evaluator struct {
-	mem    *Memory
-	locals map[string]any
+	mem     *Memory
+	locals  map[string]any
+	shared  map[string]any // workgroup-shared store (nil for non-shared kernels)
+	barrier *barrier       // workgroup barrier (nil for non-shared kernels)
 }
 
 func (ev *evaluator) lookup(name string) (any, bool) {
 	if v, ok := ev.locals[name]; ok {
+		return v, true
+	}
+	if v, ok := ev.shared[name]; ok {
 		return v, true
 	}
 	v, ok := ev.mem.Vars[name]
@@ -133,7 +237,10 @@ func (ev *evaluator) execStmt(s ir.Stmt) (flow, error) {
 	case ir.Break:
 		return flowBreak, nil
 	case ir.Barrier:
-		return flowNormal, fmt.Errorf("run: workgroup barrier requires lockstep execution, unsupported in the CPU fallback")
+		if ev.barrier == nil {
+			return flowNormal, fmt.Errorf("run: barrier outside a workgroup (kernel declares no shared memory)")
+		}
+		ev.barrier.wait()
 	case ir.Do:
 		_, err := ev.eval(x.Expr)
 		return flowNormal, err
@@ -433,13 +540,28 @@ func litValue(t string) any {
 	case "false":
 		return false
 	}
-	f, _ := strconv.ParseFloat(strings.TrimRight(t, "uif"), 64)
-	return f
+	// Float if it has a decimal point or an explicit 'f' suffix; otherwise an
+	// integer (u32 / i32 literal), so that integer division and modulo truncate
+	// exactly as every GPU backend does.
+	if strings.Contains(t, ".") || strings.HasSuffix(t, "f") {
+		f, _ := strconv.ParseFloat(strings.TrimRight(t, "uif"), 64)
+		return f
+	}
+	n, _ := strconv.ParseInt(strings.TrimRight(t, "uif"), 10, 64)
+	return n
 }
 
 func binop(op string, l, r any) (any, error) {
 	if isVec(l) || isVec(r) {
 		return vecBinop(op, l, r)
+	}
+	// Integer operands (u32 / i32) use integer arithmetic — crucially, `/` and
+	// `%` truncate, so a reduction stride 32→16→…→1→0 terminates instead of
+	// halving forever as floats.
+	if li, ok := l.(int64); ok {
+		if ri, ok := r.(int64); ok {
+			return intBinop(op, li, ri)
+		}
 	}
 	a, b := toFloat(l), toFloat(r)
 	switch op {
@@ -465,6 +587,40 @@ func binop(op string, l, r any) (any, error) {
 		return a != b, nil
 	}
 	return nil, fmt.Errorf("run: unsupported binary operator %q", op)
+}
+
+func intBinop(op string, a, b int64) (any, error) {
+	switch op {
+	case "+":
+		return a + b, nil
+	case "-":
+		return a - b, nil
+	case "*":
+		return a * b, nil
+	case "/":
+		if b == 0 {
+			return nil, fmt.Errorf("run: integer divide by zero")
+		}
+		return a / b, nil
+	case "%":
+		if b == 0 {
+			return nil, fmt.Errorf("run: integer modulo by zero")
+		}
+		return a % b, nil
+	case "<":
+		return a < b, nil
+	case ">":
+		return a > b, nil
+	case "<=":
+		return a <= b, nil
+	case ">=":
+		return a >= b, nil
+	case "==":
+		return a == b, nil
+	case "!=":
+		return a != b, nil
+	}
+	return nil, fmt.Errorf("run: unsupported integer operator %q", op)
 }
 
 func isVec(v any) bool { _, ok := v.([]float64); return ok }
@@ -514,6 +670,8 @@ func toFloat(v any) float64 {
 	switch x := v.(type) {
 	case float64:
 		return x
+	case int64:
+		return float64(x)
 	case bool:
 		if x {
 			return 1
@@ -527,6 +685,8 @@ func toBool(v any) bool {
 	case bool:
 		return x
 	case float64:
+		return x != 0
+	case int64:
 		return x != 0
 	}
 	return false
