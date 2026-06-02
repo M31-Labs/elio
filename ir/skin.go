@@ -34,14 +34,14 @@ import "strconv"
 // and scaled by its weight; the four are accumulated into outPos.
 func SkinLBS() *Module {
 	body := []Stmt{
-		Let{"i", Member{Name{"gid"}, "x"}},
+		Let{Name: "i", Value: Member{Name{"gid"}, "x"}},
 		If{
 			Cond: Binary{">=", Name{"i"}, Call{"arrayLength", []Expr{AddrOf{Name{"restPos"}}}}},
 			Then: []Stmt{Return{}},
 		},
-		Let{"p", Index{Name{"restPos"}, Name{"i"}}},
-		Let{"j", Index{Name{"joints"}, Name{"i"}}},
-		Let{"w", Index{Name{"weights"}, Name{"i"}}},
+		Let{Name: "p", Value: Index{Name{"restPos"}, Name{"i"}}},
+		Let{Name: "j", Value: Index{Name{"joints"}, Name{"i"}}},
+		Let{Name: "w", Value: Index{Name{"weights"}, Name{"i"}}},
 	}
 
 	// First influence seeds the accumulator; the remaining three add into it.
@@ -88,7 +88,7 @@ func transform(base Expr) Expr {
 // bone in joint component comp, and the transformed point scaled by weight comp).
 func weightedInfluence(comp string) (Stmt, Expr) {
 	baseName := "b_" + comp
-	return Let{baseName, Binary{"*", Member{Name{"j"}, comp}, Lit{"4u"}}},
+	return Let{Name: baseName, Value: Binary{"*", Member{Name{"j"}, comp}, Lit{"4u"}}},
 		Binary{"*", transform(Name{baseName}), Member{Name{"w"}, comp}}
 }
 
@@ -118,22 +118,23 @@ func weightedInfluence(comp string) (Stmt, Expr) {
 // assumed non-zero, so it seeds the accumulators and defines the antipodality
 // reference quaternion `ref`.
 func SkinDQS() *Module {
-	// ref = realQ[j.x]: the antipodality reference (influence 0's real quat).
-	ref := Index{Name{"realQ"}, Member{Name{"j"}, "x"}}
+	// refQ = realQ[j.x]: the antipodality reference (influence 0's real quat).
+	// Named refQ (not ref) because `ref` is a reserved keyword in WGSL.
+	refQ := Index{Name{"realQ"}, Member{Name{"j"}, "x"}}
 
 	// Seed the accumulators from influence 0 (component x) — no flip needed since
 	// dot(ref, ref) >= 0. Initializing from the first influence avoids needing a
 	// zero-vector constructor.
 	body := []Stmt{
-		Let{"i", Member{Name{"gid"}, "x"}},
+		Let{Name: "i", Value: Member{Name{"gid"}, "x"}},
 		If{
 			Cond: Binary{">=", Name{"i"}, Call{"arrayLength", []Expr{AddrOf{Name{"restPos"}}}}},
 			Then: []Stmt{Return{}},
 		},
-		Let{"p", Index{Name{"restPos"}, Name{"i"}}},
-		Let{"j", Index{Name{"joints"}, Name{"i"}}},
-		Let{"w", Index{Name{"weights"}, Name{"i"}}},
-		Let{"ref", ref},
+		Let{Name: "p", Value: Index{Name{"restPos"}, Name{"i"}}},
+		Let{Name: "j", Value: Index{Name{"joints"}, Name{"i"}}},
+		Let{Name: "w", Value: Index{Name{"weights"}, Name{"i"}}},
+		Let{Name: "refQ", Value: refQ},
 		Var{Name: "accReal", Type: Vec{4, F32}, Init: Binary{"*", Index{Name{"realQ"}, Member{Name{"j"}, "x"}}, Member{Name{"w"}, "x"}}},
 		Var{Name: "accDual", Type: Vec{4, F32}, Init: Binary{"*", Index{Name{"dualQ"}, Member{Name{"j"}, "x"}}, Member{Name{"w"}, "x"}}},
 		Var{Name: "scaleAcc", Type: Vec{4, F32}, Init: Binary{"*", Index{Name{"boneScale"}, Member{Name{"j"}, "x"}}, Member{Name{"w"}, "x"}}},
@@ -149,13 +150,13 @@ func SkinDQS() *Module {
 		sc := "sc" + s
 		wq := "wq" + s
 		body = append(body,
-			Let{bc, Member{Name{"j"}, comp}},
-			Let{rc, Index{Name{"realQ"}, Name{bc}}},
-			Let{dc, Index{Name{"dualQ"}, Name{bc}}},
-			Let{sc, Index{Name{"boneScale"}, Name{bc}}},
+			Let{Name: bc, Value: Member{Name{"j"}, comp}},
+			Let{Name: rc, Value: Index{Name{"realQ"}, Name{bc}}},
+			Let{Name: dc, Value: Index{Name{"dualQ"}, Name{bc}}},
+			Let{Name: sc, Value: Index{Name{"boneScale"}, Name{bc}}},
 			Var{Name: wq, Type: F32, Init: Member{Name{"w"}, comp}},
 			If{
-				Cond: Binary{"<", Call{"dot", []Expr{Name{rc}, Name{"ref"}}}, Lit{"0.0"}},
+				Cond: Binary{"<", Call{"dot", []Expr{Name{rc}, Name{"refQ"}}}, Lit{"0.0"}},
 				Then: []Stmt{Assign{Target: Name{wq}, Value: Unary{"-", Member{Name{"w"}, comp}}}},
 			},
 			Assign{Target: Name{"accReal"}, Value: Binary{"+", Name{"accReal"}, Binary{"*", Name{rc}, Name{wq}}}},
@@ -167,13 +168,13 @@ func SkinDQS() *Module {
 
 	// Normalize the blended dual quaternion by the real part's magnitude.
 	body = append(body,
-		Let{"inv", Binary{"/", Lit{"1.0"}, Call{"sqrt", []Expr{Call{"dot", []Expr{Name{"accReal"}, Name{"accReal"}}}}}}},
-		Let{"r", Binary{"*", Name{"accReal"}, Name{"inv"}}},
-		Let{"d", Binary{"*", Name{"accDual"}, Name{"inv"}}},
+		Let{Name: "inv", Value: Binary{"/", Lit{"1.0"}, Call{"sqrt", []Expr{Call{"dot", []Expr{Name{"accReal"}, Name{"accReal"}}}}}}},
+		Let{Name: "r", Value: Binary{"*", Name{"accReal"}, Name{"inv"}}},
+		Let{Name: "d", Value: Binary{"*", Name{"accDual"}, Name{"inv"}}},
 		// Blended uniform scale, applied componentwise to the rest position.
-		Let{"invw", Binary{"/", Lit{"1.0"}, Name{"wsum"}}},
-		Let{"sb", Binary{"*", Name{"scaleAcc"}, Name{"invw"}}},
-		Let{"base", Binary{"*", Name{"p"}, Name{"sb"}}},
+		Let{Name: "invw", Value: Binary{"/", Lit{"1.0"}, Name{"wsum"}}},
+		Let{Name: "sb", Value: Binary{"*", Name{"scaleAcc"}, Name{"invw"}}},
+		Let{Name: "base", Value: Binary{"*", Name{"p"}, Name{"sb"}}},
 	)
 
 	// Rotate base.xyz by the unit quaternion r (u = r.xyz):
@@ -191,17 +192,17 @@ func SkinDQS() *Module {
 	// cross(a,b) = (a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x)
 	// uv = cross(r.xyz, base.xyz)
 	body = append(body,
-		Let{"uvx", Binary{"-", Binary{"*", ry, bz}, Binary{"*", rz, by}}},
-		Let{"uvy", Binary{"-", Binary{"*", rz, bx}, Binary{"*", rx, bz}}},
-		Let{"uvz", Binary{"-", Binary{"*", rx, by}, Binary{"*", ry, bx}}},
+		Let{Name: "uvx", Value: Binary{"-", Binary{"*", ry, bz}, Binary{"*", rz, by}}},
+		Let{Name: "uvy", Value: Binary{"-", Binary{"*", rz, bx}, Binary{"*", rx, bz}}},
+		Let{Name: "uvz", Value: Binary{"-", Binary{"*", rx, by}, Binary{"*", ry, bx}}},
 		// uuv = cross(r.xyz, uv)
-		Let{"uuvx", Binary{"-", Binary{"*", ry, Name{"uvz"}}, Binary{"*", rz, Name{"uvy"}}}},
-		Let{"uuvy", Binary{"-", Binary{"*", rz, Name{"uvx"}}, Binary{"*", rx, Name{"uvz"}}}},
-		Let{"uuvz", Binary{"-", Binary{"*", rx, Name{"uvy"}}, Binary{"*", ry, Name{"uvx"}}}},
+		Let{Name: "uuvx", Value: Binary{"-", Binary{"*", ry, Name{"uvz"}}, Binary{"*", rz, Name{"uvy"}}}},
+		Let{Name: "uuvy", Value: Binary{"-", Binary{"*", rz, Name{"uvx"}}, Binary{"*", rx, Name{"uvz"}}}},
+		Let{Name: "uuvz", Value: Binary{"-", Binary{"*", rx, Name{"uvy"}}, Binary{"*", ry, Name{"uvx"}}}},
 		// rotated = base + 2*r.w*uv + 2*uuv
-		Let{"rotx", Binary{"+", bx, Binary{"+", Binary{"*", Binary{"*", Lit{"2.0"}, rw}, Name{"uvx"}}, Binary{"*", Lit{"2.0"}, Name{"uuvx"}}}}},
-		Let{"roty", Binary{"+", by, Binary{"+", Binary{"*", Binary{"*", Lit{"2.0"}, rw}, Name{"uvy"}}, Binary{"*", Lit{"2.0"}, Name{"uuvy"}}}}},
-		Let{"rotz", Binary{"+", bz, Binary{"+", Binary{"*", Binary{"*", Lit{"2.0"}, rw}, Name{"uvz"}}, Binary{"*", Lit{"2.0"}, Name{"uuvz"}}}}},
+		Let{Name: "rotx", Value: Binary{"+", bx, Binary{"+", Binary{"*", Binary{"*", Lit{"2.0"}, rw}, Name{"uvx"}}, Binary{"*", Lit{"2.0"}, Name{"uuvx"}}}}},
+		Let{Name: "roty", Value: Binary{"+", by, Binary{"+", Binary{"*", Binary{"*", Lit{"2.0"}, rw}, Name{"uvy"}}, Binary{"*", Lit{"2.0"}, Name{"uuvy"}}}}},
+		Let{Name: "rotz", Value: Binary{"+", bz, Binary{"+", Binary{"*", Binary{"*", Lit{"2.0"}, rw}, Name{"uvz"}}, Binary{"*", Lit{"2.0"}, Name{"uuvz"}}}}},
 	)
 
 	// Translation t = xyz of 2 * qMul(d, conj(r)):
@@ -213,11 +214,11 @@ func SkinDQS() *Module {
 	dz := Member{Name{"d"}, "z"}
 	dw := Member{Name{"d"}, "w"}
 	body = append(body,
-		Let{"tx", Binary{"*", Lit{"2.0"},
+		Let{Name: "tx", Value: Binary{"*", Lit{"2.0"},
 			Binary{"+", Binary{"-", Binary{"+", Unary{"-", Binary{"*", dw, rx}}, Binary{"*", dx, rw}}, Binary{"*", dy, rz}}, Binary{"*", dz, ry}}}},
-		Let{"ty", Binary{"*", Lit{"2.0"},
+		Let{Name: "ty", Value: Binary{"*", Lit{"2.0"},
 			Binary{"-", Binary{"+", Binary{"+", Unary{"-", Binary{"*", dw, ry}}, Binary{"*", dx, rz}}, Binary{"*", dy, rw}}, Binary{"*", dz, rx}}}},
-		Let{"tz", Binary{"*", Lit{"2.0"},
+		Let{Name: "tz", Value: Binary{"*", Lit{"2.0"},
 			Binary{"+", Binary{"+", Binary{"-", Unary{"-", Binary{"*", dw, rz}}, Binary{"*", dx, ry}}, Binary{"*", dy, rx}}, Binary{"*", dz, rw}}}},
 	)
 
@@ -265,10 +266,10 @@ func SqrtKernel() *Module {
 			WorkgroupSize: [3]int{64, 1, 1},
 			Builtins:      []Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: Vec{3, U32}}},
 			Body: []Stmt{
-				Let{"i", Member{Name{"gid"}, "x"}},
+				Let{Name: "i", Value: Member{Name{"gid"}, "x"}},
 				If{Cond: Binary{">=", Name{"i"}, Call{"arrayLength", []Expr{AddrOf{Name{"a"}}}}}, Then: []Stmt{Return{}}},
-				Let{"p", Index{Name{"a"}, Name{"i"}}},
-				Let{"s", Call{"sqrt", []Expr{Call{"dot", []Expr{Name{"p"}, Name{"p"}}}}}},
+				Let{Name: "p", Value: Index{Name{"a"}, Name{"i"}}},
+				Let{Name: "s", Value: Call{"sqrt", []Expr{Call{"dot", []Expr{Name{"p"}, Name{"p"}}}}}},
 				Assign{Target: Index{Name{"dst"}, Name{"i"}}, Value: Binary{"*", Name{"p"}, Name{"s"}}},
 			},
 		}},
