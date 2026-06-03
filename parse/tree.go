@@ -7,48 +7,26 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 
 	gts "github.com/odvcencio/gotreesitter"
-	"github.com/odvcencio/gotreesitter/grammargen"
+	"github.com/odvcencio/gotreesitter/taproot"
 
 	"m31labs.dev/elio/grammar"
 	"m31labs.dev/elio/ir"
 )
 
-var (
-	elioLangOnce sync.Once
-	elioLang     *gts.Language
-	elioLangErr  error
-)
-
-func elioLanguage() (*gts.Language, error) {
-	elioLangOnce.Do(func() {
-		elioLang, _, elioLangErr = grammargen.GenerateLanguageAndBlob(grammar.ElioGrammar())
-	})
-	return elioLang, elioLangErr
-}
-
 // Parse parses Elio source into an ir.Module using the grammargen-generated
 // tree-sitter grammar (grammar.ElioGrammar).
 func Parse(src string) (*ir.Module, error) {
-	l, err := elioLanguage()
+	root, tw, err := taproot.Parse("elio", grammar.ElioGrammar, []byte(src))
 	if err != nil {
-		return nil, fmt.Errorf("generate elio language: %w", err)
+		return nil, err
 	}
-	tree, err := gts.NewParser(l).Parse([]byte(src))
-	if err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
-	}
-	root := tree.RootNode()
-	w := &treeWalker{lang: l, src: []byte(src)}
-	if root.HasError() {
-		return nil, w.syntaxError(root)
-	}
+	w := &treeWalker{Walker: tw}
 	m := &ir.Module{}
 	for i := 0; i < root.NamedChildCount(); i++ {
 		c := root.NamedChild(i)
-		switch w.typ(c) {
+		switch w.Type(c) {
 		case "struct_decl":
 			s, err := w.structDecl(c)
 			if err != nil {
@@ -56,15 +34,15 @@ func Parse(src string) (*ir.Module, error) {
 			}
 			m.Structs = append(m.Structs, s)
 		case "const_decl":
-			t, err := w.typeOf(w.field(c, "type"))
+			t, err := w.typeOf(w.Field(c, "type"))
 			if err != nil {
 				return nil, err
 			}
-			v, err := w.expr(w.field(c, "value"))
+			v, err := w.expr(w.Field(c, "value"))
 			if err != nil {
 				return nil, err
 			}
-			m.Consts = append(m.Consts, ir.Const{Name: w.text(w.field(c, "name")), Type: t, Value: v})
+			m.Consts = append(m.Consts, ir.Const{Name: w.Text(w.Field(c, "name")), Type: t, Value: v})
 		case "binding_decl":
 			b, err := w.binding(c)
 			if err != nil {
@@ -83,81 +61,27 @@ func Parse(src string) (*ir.Module, error) {
 }
 
 type treeWalker struct {
-	lang *gts.Language
-	src  []byte
+	*taproot.Walker
 }
 
-func (w *treeWalker) typ(n *gts.Node) string                { return n.Type(w.lang) }
-func (w *treeWalker) text(n *gts.Node) string               { return n.Text(w.src) }
-func (w *treeWalker) field(n *gts.Node, f string) *gts.Node { return n.ChildByFieldName(f, w.lang) }
-
-// span is the 1-based source position where n begins.
+// span returns the 1-based source position where n begins.
 func (w *treeWalker) span(n *gts.Node) ir.Span {
-	pt := n.StartPoint()
-	return ir.Span{Line: int(pt.Row) + 1, Col: int(pt.Column) + 1}
-}
-
-func (w *treeWalker) syntaxError(n *gts.Node) error {
-	// GLR error recovery often wraps the whole input in one coarse ERROR node, so
-	// the *deepest* error isn't the most useful. Collect every error/missing leaf
-	// and report the latest-positioned one — in LR parsing the failure surfaces at
-	// or just before the token where the parser got stuck — preferring MISSING
-	// nodes (which pinpoint an expected-but-absent token).
-	var best *gts.Node
-	bestMissing := false
-	var walk func(n *gts.Node)
-	walk = func(n *gts.Node) {
-		bad := n.Type(w.lang) == "ERROR" || n.IsError() || n.IsMissing()
-		childBad := false
-		for i := 0; i < n.ChildCount(); i++ {
-			c := n.Child(i)
-			if c == nil {
-				continue
-			}
-			if c.Type(w.lang) == "ERROR" || c.IsError() || c.IsMissing() {
-				childBad = true
-			}
-			walk(c)
-		}
-		if bad && !childBad { // a leaf error/missing node
-			miss := n.IsMissing()
-			switch {
-			case best == nil:
-			case miss && !bestMissing:
-			case miss == bestMissing && n.StartByte() > best.StartByte():
-			default:
-				return
-			}
-			best, bestMissing = n, miss
-		}
-	}
-	walk(n)
-	if best == nil {
-		return fmt.Errorf("parse: syntax error")
-	}
-	pt := best.StartPoint()
-	if best.IsMissing() {
-		return fmt.Errorf("parse: %d:%d: syntax error: expected %s", pt.Row+1, pt.Column+1, best.Type(w.lang))
-	}
-	near := strings.TrimSpace(w.text(best))
-	if len(near) > 30 {
-		near = near[:30] + "…"
-	}
-	return fmt.Errorf("parse: %d:%d: syntax error near %q", pt.Row+1, pt.Column+1, near)
+	line, col := w.Pos(n)
+	return ir.Span{Line: line, Col: col}
 }
 
 func (w *treeWalker) structDecl(n *gts.Node) (ir.Struct, error) {
-	s := ir.Struct{Name: w.text(w.field(n, "name"))}
+	s := ir.Struct{Name: w.Text(w.Field(n, "name"))}
 	for i := 0; i < n.NamedChildCount(); i++ {
 		c := n.NamedChild(i)
-		if w.typ(c) != "field_decl" {
+		if w.Type(c) != "field_decl" {
 			continue
 		}
-		t, err := w.typeOf(w.field(c, "type"))
+		t, err := w.typeOf(w.Field(c, "type"))
 		if err != nil {
 			return ir.Struct{}, err
 		}
-		s.Fields = append(s.Fields, ir.Field{Name: w.text(w.field(c, "name")), Type: t})
+		s.Fields = append(s.Fields, ir.Field{Name: w.Text(w.Field(c, "name")), Type: t})
 	}
 	return s, nil
 }
@@ -199,32 +123,32 @@ func scalarType(name string) ir.Type {
 }
 
 func (w *treeWalker) typeOf(n *gts.Node) (ir.Type, error) {
-	switch w.typ(n) {
+	switch w.Type(n) {
 	case "type":
 		// `type` is a plain (non-supertype) rule wrapping the concrete node.
 		return w.typeOf(n.NamedChild(0))
 	case "array_type":
-		elem, err := w.typeOf(w.field(n, "elem"))
+		elem, err := w.typeOf(w.Field(n, "elem"))
 		if err != nil {
 			return nil, err
 		}
 		length := 0
-		if l := w.field(n, "len"); l != nil {
-			length, _ = strconv.Atoi(w.text(l))
+		if l := w.Field(n, "len"); l != nil {
+			length, _ = strconv.Atoi(w.Text(l))
 		}
 		return ir.Array{Elem: elem, Len: length}, nil
 	case "identifier":
-		return scalarType(w.text(n)), nil
+		return scalarType(w.Text(n)), nil
 	}
-	return nil, fmt.Errorf("parse: unexpected type node %q", w.typ(n))
+	return nil, fmt.Errorf("parse: unexpected type node %q", w.Type(n))
 }
 
 func (w *treeWalker) binding(n *gts.Node) (ir.Binding, error) {
-	g, _ := strconv.Atoi(w.text(w.field(n, "group")))
-	b, _ := strconv.Atoi(w.text(w.field(n, "binding")))
-	out := ir.Binding{Group: g, Binding: b, Name: w.text(w.field(n, "name"))}
+	g, _ := strconv.Atoi(w.Text(w.Field(n, "group")))
+	b, _ := strconv.Atoi(w.Text(w.Field(n, "binding")))
+	out := ir.Binding{Group: g, Binding: b, Name: w.Text(w.Field(n, "name"))}
 	// qualifier text is "uniform" | "storage" | "storage read" | "storage read_write"
-	fields := strings.Fields(w.text(w.field(n, "qualifier")))
+	fields := strings.Fields(w.Text(w.Field(n, "qualifier")))
 	switch {
 	case len(fields) > 0 && fields[0] == "uniform":
 		out.Space = ir.Uniform
@@ -239,9 +163,9 @@ func (w *treeWalker) binding(n *gts.Node) (ir.Binding, error) {
 			}
 		}
 	default:
-		return ir.Binding{}, fmt.Errorf("parse: bad binding qualifier %q", w.text(w.field(n, "qualifier")))
+		return ir.Binding{}, fmt.Errorf("parse: bad binding qualifier %q", w.Text(w.Field(n, "qualifier")))
 	}
-	t, err := w.typeOf(w.field(n, "type"))
+	t, err := w.typeOf(w.Field(n, "type"))
 	if err != nil {
 		return ir.Binding{}, err
 	}
@@ -250,40 +174,40 @@ func (w *treeWalker) binding(n *gts.Node) (ir.Binding, error) {
 }
 
 func (w *treeWalker) kernel(n *gts.Node) (ir.Kernel, error) {
-	k := ir.Kernel{Name: w.text(w.field(n, "name")), WorkgroupSize: [3]int{1, 1, 1}}
+	k := ir.Kernel{Name: w.Text(w.Field(n, "name")), WorkgroupSize: [3]int{1, 1, 1}}
 	for i, f := range []string{"wgx", "wgy", "wgz"} {
-		if d := w.field(n, f); d != nil {
-			k.WorkgroupSize[i], _ = strconv.Atoi(w.text(d))
+		if d := w.Field(n, f); d != nil {
+			k.WorkgroupSize[i], _ = strconv.Atoi(w.Text(d))
 		}
 	}
 	for i := 0; i < n.NamedChildCount(); i++ {
 		c := n.NamedChild(i)
-		if w.typ(c) != "params" {
+		if w.Type(c) != "params" {
 			continue
 		}
 		for j := 0; j < c.NamedChildCount(); j++ {
 			p := c.NamedChild(j)
-			if w.typ(p) != "param" {
+			if w.Type(p) != "param" {
 				continue
 			}
 			k.Builtins = append(k.Builtins, ir.Builtin{
-				Name:    w.text(w.field(p, "name")),
-				Builtin: w.text(w.field(p, "builtin")),
+				Name:    w.Text(w.Field(p, "name")),
+				Builtin: w.Text(w.Field(p, "builtin")),
 				Type:    ir.Vec{N: 3, Elem: ir.U32},
 			})
 		}
 	}
 	// The kernel_body separates shared declarations (a prefix) from statements.
-	bodyNode := w.field(n, "body")
+	bodyNode := w.Field(n, "body")
 	for i := 0; i < bodyNode.NamedChildCount(); i++ {
 		c := bodyNode.NamedChild(i)
-		switch w.typ(c) {
+		switch w.Type(c) {
 		case "shared_decl":
-			t, err := w.typeOf(w.field(c, "type"))
+			t, err := w.typeOf(w.Field(c, "type"))
 			if err != nil {
 				return ir.Kernel{}, err
 			}
-			k.Shared = append(k.Shared, ir.Shared{Name: w.text(w.field(c, "name")), Type: t})
+			k.Shared = append(k.Shared, ir.Shared{Name: w.Text(w.Field(c, "name")), Type: t})
 		case "statement":
 			st, err := w.stmt(c.NamedChild(0))
 			if err != nil {
@@ -299,7 +223,7 @@ func (w *treeWalker) block(n *gts.Node) ([]ir.Stmt, error) {
 	var body []ir.Stmt
 	for i := 0; i < n.NamedChildCount(); i++ {
 		c := n.NamedChild(i)
-		if w.typ(c) != "statement" {
+		if w.Type(c) != "statement" {
 			// supertype may expose the concrete statement directly
 			if s, ok := w.maybeStmt(c); ok {
 				st, err := s()
@@ -322,7 +246,7 @@ func (w *treeWalker) block(n *gts.Node) ([]ir.Stmt, error) {
 // maybeStmt returns a thunk if n is a concrete statement node (used when the
 // `statement` supertype is elided and the concrete node appears directly).
 func (w *treeWalker) maybeStmt(n *gts.Node) (func() (ir.Stmt, error), bool) {
-	switch w.typ(n) {
+	switch w.Type(n) {
 	case "let_stmt", "var_stmt", "return_stmt", "break_stmt", "barrier_stmt", "if_stmt", "for_stmt", "while_stmt", "assign_stmt":
 		return func() (ir.Stmt, error) { return w.stmt(n) }, true
 	}
@@ -330,13 +254,13 @@ func (w *treeWalker) maybeStmt(n *gts.Node) (func() (ir.Stmt, error), bool) {
 }
 
 func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
-	switch w.typ(n) {
+	switch w.Type(n) {
 	case "let_stmt":
-		v, err := w.expr(w.field(n, "value"))
+		v, err := w.expr(w.Field(n, "value"))
 		if err != nil {
 			return nil, err
 		}
-		return ir.Let{Name: w.text(w.field(n, "name")), Value: v, Span: w.span(n)}, nil
+		return ir.Let{Name: w.Text(w.Field(n, "name")), Value: v, Span: w.span(n)}, nil
 	case "var_stmt":
 		return w.varInner(n.NamedChild(0))
 	case "return_stmt":
@@ -350,11 +274,11 @@ func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
 	case "for_stmt":
 		return w.forStmt(n)
 	case "while_stmt":
-		cond, err := w.expr(w.field(n, "cond"))
+		cond, err := w.expr(w.Field(n, "cond"))
 		if err != nil {
 			return nil, err
 		}
-		body, err := w.block(w.field(n, "body"))
+		body, err := w.block(w.Field(n, "body"))
 		if err != nil {
 			return nil, err
 		}
@@ -362,19 +286,19 @@ func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
 	case "assign_stmt":
 		return w.assignInner(n.NamedChild(0))
 	}
-	return nil, fmt.Errorf("parse: unexpected statement node %q", w.typ(n))
+	return nil, fmt.Errorf("parse: unexpected statement node %q", w.Type(n))
 }
 
 func (w *treeWalker) varInner(n *gts.Node) (ir.Stmt, error) {
-	v := ir.Var{Name: w.text(w.field(n, "name")), Span: w.span(n)}
-	if t := w.field(n, "type"); t != nil {
+	v := ir.Var{Name: w.Text(w.Field(n, "name")), Span: w.span(n)}
+	if t := w.Field(n, "type"); t != nil {
 		typ, err := w.typeOf(t)
 		if err != nil {
 			return nil, err
 		}
 		v.Type = typ
 	}
-	init, err := w.expr(w.field(n, "value"))
+	init, err := w.expr(w.Field(n, "value"))
 	if err != nil {
 		return nil, err
 	}
@@ -383,15 +307,15 @@ func (w *treeWalker) varInner(n *gts.Node) (ir.Stmt, error) {
 }
 
 func (w *treeWalker) assignInner(n *gts.Node) (ir.Stmt, error) {
-	target, err := w.expr(w.field(n, "target"))
+	target, err := w.expr(w.Field(n, "target"))
 	if err != nil {
 		return nil, err
 	}
-	value, err := w.expr(w.field(n, "value"))
+	value, err := w.expr(w.Field(n, "value"))
 	if err != nil {
 		return nil, err
 	}
-	return ir.Assign{Target: target, Value: value, Op: compoundOp(w.text(w.field(n, "op"))), Span: w.span(n)}, nil
+	return ir.Assign{Target: target, Value: value, Op: compoundOp(w.Text(w.Field(n, "op"))), Span: w.span(n)}, nil
 }
 
 // compoundOp maps an assignment operator token to ir.Assign.Op: "=" → "" (plain
@@ -404,17 +328,17 @@ func compoundOp(tok string) string {
 }
 
 func (w *treeWalker) ifStmt(n *gts.Node) (ir.Stmt, error) {
-	cond, err := w.expr(w.field(n, "cond"))
+	cond, err := w.expr(w.Field(n, "cond"))
 	if err != nil {
 		return nil, err
 	}
-	then, err := w.block(w.field(n, "then"))
+	then, err := w.block(w.Field(n, "then"))
 	if err != nil {
 		return nil, err
 	}
 	out := ir.If{Cond: cond, Then: then, Span: w.span(n)}
-	if e := w.field(n, "else"); e != nil {
-		switch w.typ(e) {
+	if e := w.Field(n, "else"); e != nil {
+		switch w.Type(e) {
 		case "if_stmt":
 			s, err := w.ifStmt(e)
 			if err != nil {
@@ -433,29 +357,29 @@ func (w *treeWalker) ifStmt(n *gts.Node) (ir.Stmt, error) {
 }
 
 func (w *treeWalker) forStmt(n *gts.Node) (ir.Stmt, error) {
-	initNode := w.field(n, "init")
+	initNode := w.Field(n, "init")
 	var init ir.Stmt
 	var err error
-	switch w.typ(initNode) {
+	switch w.Type(initNode) {
 	case "var_inner":
 		init, err = w.varInner(initNode)
 	case "assign_inner":
 		init, err = w.assignInner(initNode)
 	default:
-		return nil, fmt.Errorf("parse: unexpected for-init node %q", w.typ(initNode))
+		return nil, fmt.Errorf("parse: unexpected for-init node %q", w.Type(initNode))
 	}
 	if err != nil {
 		return nil, err
 	}
-	cond, err := w.expr(w.field(n, "cond"))
+	cond, err := w.expr(w.Field(n, "cond"))
 	if err != nil {
 		return nil, err
 	}
-	post, err := w.assignInner(w.field(n, "post"))
+	post, err := w.assignInner(w.Field(n, "post"))
 	if err != nil {
 		return nil, err
 	}
-	body, err := w.block(w.field(n, "body"))
+	body, err := w.block(w.Field(n, "body"))
 	if err != nil {
 		return nil, err
 	}
@@ -463,14 +387,14 @@ func (w *treeWalker) forStmt(n *gts.Node) (ir.Stmt, error) {
 }
 
 func (w *treeWalker) expr(n *gts.Node) (ir.Expr, error) {
-	switch w.typ(n) {
+	switch w.Type(n) {
 	case "expression", "postfix_expression", "primary_expression":
 		// supertype wrapper materialized — unwrap to the concrete node
 		return w.expr(n.NamedChild(0))
 	case "number":
-		return ir.Lit{Text: w.text(n)}, nil
+		return ir.Lit{Text: w.Text(n)}, nil
 	case "identifier":
-		t := w.text(n)
+		t := w.Text(n)
 		if t == "true" || t == "false" {
 			return ir.Lit{Text: t}, nil
 		}
@@ -478,36 +402,36 @@ func (w *treeWalker) expr(n *gts.Node) (ir.Expr, error) {
 	case "paren_expression":
 		return w.expr(n.NamedChild(0))
 	case "binary_expression":
-		l, err := w.expr(w.field(n, "left"))
+		l, err := w.expr(w.Field(n, "left"))
 		if err != nil {
 			return nil, err
 		}
-		r, err := w.expr(w.field(n, "right"))
+		r, err := w.expr(w.Field(n, "right"))
 		if err != nil {
 			return nil, err
 		}
-		return ir.Binary{Op: w.text(w.field(n, "operator")), L: l, R: r}, nil
+		return ir.Binary{Op: w.Text(w.Field(n, "operator")), L: l, R: r}, nil
 	case "unary_expression":
-		e, err := w.expr(w.field(n, "operand"))
+		e, err := w.expr(w.Field(n, "operand"))
 		if err != nil {
 			return nil, err
 		}
-		if w.text(w.field(n, "op")) == "&" {
+		if w.Text(w.Field(n, "op")) == "&" {
 			return ir.AddrOf{E: e}, nil
 		}
-		return ir.Unary{Op: w.text(w.field(n, "op")), E: e}, nil
+		return ir.Unary{Op: w.Text(w.Field(n, "op")), E: e}, nil
 	case "member_expression":
-		obj, err := w.expr(w.field(n, "object"))
+		obj, err := w.expr(w.Field(n, "object"))
 		if err != nil {
 			return nil, err
 		}
-		return ir.Member{E: obj, Field: w.text(w.field(n, "field"))}, nil
+		return ir.Member{E: obj, Field: w.Text(w.Field(n, "field"))}, nil
 	case "index_expression":
-		obj, err := w.expr(w.field(n, "object"))
+		obj, err := w.expr(w.Field(n, "object"))
 		if err != nil {
 			return nil, err
 		}
-		idx, err := w.expr(w.field(n, "index"))
+		idx, err := w.expr(w.Field(n, "index"))
 		if err != nil {
 			return nil, err
 		}
@@ -516,7 +440,7 @@ func (w *treeWalker) expr(n *gts.Node) (ir.Expr, error) {
 		var args []ir.Expr
 		for i := 0; i < n.NamedChildCount(); i++ {
 			c := n.NamedChild(i)
-			if w.typ(c) != "arguments" {
+			if w.Type(c) != "arguments" {
 				continue
 			}
 			for j := 0; j < c.NamedChildCount(); j++ {
@@ -527,7 +451,7 @@ func (w *treeWalker) expr(n *gts.Node) (ir.Expr, error) {
 				args = append(args, a)
 			}
 		}
-		return ir.Call{Func: w.text(w.field(n, "callee")), Args: args}, nil
+		return ir.Call{Func: w.Text(w.Field(n, "callee")), Args: args}, nil
 	}
-	return nil, fmt.Errorf("parse: unexpected expression node %q", w.typ(n))
+	return nil, fmt.Errorf("parse: unexpected expression node %q", w.Type(n))
 }
