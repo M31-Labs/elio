@@ -60,15 +60,8 @@ func loadModule(path string) (*ir.Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	// House-style front-end: the grammargen/gotreesitter grammar (shared with
-	// Selena and Manta). The hand-written parser remains the test oracle.
-	mod, err := parse.ParseTree(string(src))
+	mod, err := parse.Parse(string(src))
 	if err != nil {
-		// grammargen's GLR error recovery reports coarse locations; the
-		// recursive-descent parser pinpoints the exact token. Prefer its message.
-		if _, herr := parse.Parse(string(src)); herr != nil {
-			return nil, herr
-		}
 		return nil, err
 	}
 	if err := sema.Errors(sema.Check(mod)); err != nil {

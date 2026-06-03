@@ -1,8 +1,6 @@
-// tree.go is Elio's grammargen/gotreesitter front-end: it generates the .elio
-// tree-sitter language from grammar.ElioGrammar and walks the parse tree into an
-// ir.Module. This is the house-style parser (the same toolchain Selena and Manta
-// use); the hand-written parser in parse.go remains as a reference oracle, and
-// tree_test.go pins that both produce identical IR.
+// Package parse is Elio's front-end: it parses .elio compute source into an
+// ir.Module using the grammargen/gotreesitter grammar (grammar.ElioGrammar) —
+// the house-style parser shared with Selena and Manta.
 package parse
 
 import (
@@ -31,9 +29,9 @@ func elioLanguage() (*gts.Language, error) {
 	return elioLang, elioLangErr
 }
 
-// ParseTree parses Elio source into an ir.Module using the grammargen-generated
+// Parse parses Elio source into an ir.Module using the grammargen-generated
 // tree-sitter grammar (grammar.ElioGrammar).
-func ParseTree(src string) (*ir.Module, error) {
+func Parse(src string) (*ir.Module, error) {
 	l, err := elioLanguage()
 	if err != nil {
 		return nil, fmt.Errorf("generate elio language: %w", err)
@@ -162,6 +160,42 @@ func (w *treeWalker) structDecl(n *gts.Node) (ir.Struct, error) {
 		s.Fields = append(s.Fields, ir.Field{Name: w.text(w.field(c, "name")), Type: t})
 	}
 	return s, nil
+}
+
+// scalarType maps an Elio type identifier to its ir.Type. Named types that are
+// not known scalar/vector/matrix/atomic names are returned as ir.Named.
+func scalarType(name string) ir.Type {
+	switch name {
+	case "f32":
+		return ir.F32
+	case "i32":
+		return ir.I32
+	case "u32":
+		return ir.U32
+	case "bool":
+		return ir.Bool
+	case "vec2":
+		return ir.Vec{N: 2, Elem: ir.F32}
+	case "vec3":
+		return ir.Vec{N: 3, Elem: ir.F32}
+	case "vec4":
+		return ir.Vec{N: 4, Elem: ir.F32}
+	case "vec2u":
+		return ir.Vec{N: 2, Elem: ir.U32}
+	case "vec3u":
+		return ir.Vec{N: 3, Elem: ir.U32}
+	case "vec4u":
+		return ir.Vec{N: 4, Elem: ir.U32}
+	case "mat3":
+		return ir.Mat{Cols: 3, Rows: 3, Elem: ir.F32}
+	case "mat4":
+		return ir.Mat{Cols: 4, Rows: 4, Elem: ir.F32}
+	case "atomic_u32":
+		return ir.Atomic{Elem: ir.U32}
+	case "atomic_i32":
+		return ir.Atomic{Elem: ir.I32}
+	}
+	return ir.Named{Name: name}
 }
 
 func (w *treeWalker) typeOf(n *gts.Node) (ir.Type, error) {

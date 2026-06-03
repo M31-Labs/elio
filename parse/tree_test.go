@@ -9,21 +9,16 @@ import (
 	"m31labs.dev/elio/ir"
 )
 
-// TestParseTreeMatchesHandWritten is the grammargen front-end proof: the
-// tree-sitter parser (grammar.ElioGrammar → ParseTree) must produce IR that
-// emits byte-identical WGSL to the hand-written recursive-descent parser. This
-// pins the postfix-chain grammar fix end-to-end: source → tree → IR → WGSL lands
-// exactly where the reference parser does.
+// TestParseTreeMatchesHandWritten is the grammargen front-end proof: Parse must
+// produce IR that emits byte-identical WGSL to the hand-built ir.CullKernel().
+// This pins the postfix-chain grammar fix end-to-end: source → tree → IR → WGSL
+// lands exactly where the reference IR does.
 func TestParseTreeMatchesHandWritten(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "cull.elio"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromTree, err := ParseTree(string(src))
-	if err != nil {
-		t.Fatalf("ParseTree: %v", err)
-	}
-	fromHand, err := Parse(string(src))
+	fromTree, err := Parse(string(src))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -31,52 +26,43 @@ func TestParseTreeMatchesHandWritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("emit tree WGSL: %v", err)
 	}
-	handWGSL, err := wgsl.Emit(fromHand)
+	handWGSL, err := wgsl.Emit(ir.CullKernel())
 	if err != nil {
-		t.Fatalf("emit hand WGSL: %v", err)
+		t.Fatalf("emit hand-built IR WGSL: %v", err)
 	}
 	if treeWGSL != handWGSL {
-		t.Errorf("grammargen parse emits differently than hand-written\n--- tree ---\n%s\n--- hand ---\n%s", treeWGSL, handWGSL)
+		t.Errorf("grammargen parse emits differently than hand-built IR\n--- tree ---\n%s\n--- want ---\n%s", treeWGSL, handWGSL)
 	}
 }
 
-// TestParseTreeReduceEndToEnd pins the workgroup-shared / barrier surface: both
-// parsers must turn reduce.elio into IR that emits identical WGSL to the
-// hand-built ir.WorkgroupReduce() — proving `shared`/`barrier` author end-to-end.
+// TestParseTreeReduceEndToEnd pins the workgroup-shared / barrier surface:
+// Parse must turn reduce.elio into IR that emits identical WGSL to the
+// hand-built ir.WorkgroupReduce() — proving shared/barrier author end-to-end.
 func TestParseTreeReduceEndToEnd(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "reduce.elio"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromTree, err := ParseTree(string(src))
-	if err != nil {
-		t.Fatalf("ParseTree: %v", err)
-	}
-	fromHand, err := Parse(string(src))
+	fromTree, err := Parse(string(src))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	treeWGSL, _ := wgsl.Emit(fromTree)
-	handWGSL, _ := wgsl.Emit(fromHand)
 	wantWGSL, _ := wgsl.Emit(ir.WorkgroupReduce())
 	if treeWGSL != wantWGSL {
 		t.Errorf("grammargen parse of reduce.elio != hand-built IR\n--- tree ---\n%s\n--- want ---\n%s", treeWGSL, wantWGSL)
 	}
-	if handWGSL != wantWGSL {
-		t.Errorf("hand-written parse of reduce.elio != hand-built IR\n--- hand ---\n%s\n--- want ---\n%s", handWGSL, wantWGSL)
-	}
 }
 
-// TestParseTreeMatchesGolden pins ParseTree against the naga-validated WGSL
-// golden directly (the same golden the hand-written parser is held to).
+// TestParseTreeMatchesGolden pins Parse against the naga-validated WGSL golden.
 func TestParseTreeMatchesGolden(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "cull.elio"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mod, err := ParseTree(string(src))
+	mod, err := Parse(string(src))
 	if err != nil {
-		t.Fatalf("ParseTree: %v", err)
+		t.Fatalf("Parse: %v", err)
 	}
 	got, err := wgsl.Emit(mod)
 	if err != nil {
@@ -87,7 +73,7 @@ func TestParseTreeMatchesGolden(t *testing.T) {
 		t.Fatalf("read wgsl golden: %v", err)
 	}
 	if got != string(want) {
-		t.Errorf("ParseTree-then-emitted WGSL != golden\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Errorf("Parse-then-emitted WGSL != golden\n--- got ---\n%s\n--- want ---\n%s", got, string(want))
 	}
 }
 
@@ -103,8 +89,8 @@ func TestParseTreeRejectsOutermostIndexRegression(t *testing.T) {
 		"@workgroup(64) kernel main(gid: x) {\n  let s = atomicAdd(&drawArgs[1], 1u);\n}\n",
 	}
 	for _, src := range cases {
-		if _, err := ParseTree(src); err != nil {
-			t.Errorf("ParseTree(%q): %v", src, err)
+		if _, err := Parse(src); err != nil {
+			t.Errorf("Parse(%q): %v", src, err)
 		}
 	}
 }
