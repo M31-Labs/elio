@@ -9,7 +9,11 @@ import (
 	"strings"
 
 	"m31labs.dev/elio/ir"
+	"m31labs.dev/prism/dialect"
+	"m31labs.dev/prism/gputype"
 )
+
+var wgslDialect = dialect.WGSL{}
 
 // Emit renders m as WGSL compute source: struct declarations, module bindings,
 // then each kernel.
@@ -195,23 +199,44 @@ func expr(e ir.Expr) string {
 	return "/* unknown expr */"
 }
 
-func typeName(t ir.Type) string {
+// elioTypeToGPU converts ir.Scalar/Vec/Mat/Array to the equivalent gputype.Type.
+// Returns (type, true) for the four prism-handled kinds; (nil, false) for
+// ir.Atomic and ir.Named, which are spelled locally in typeName.
+func elioTypeToGPU(t ir.Type) (gputype.Type, bool) {
 	switch x := t.(type) {
 	case ir.Scalar:
-		return x.Name
+		return gputype.Scalar{Name: x.Name}, true
 	case ir.Vec:
-		return fmt.Sprintf("vec%d<%s>", x.N, x.Elem.Name)
+		return gputype.Vec{N: x.N, Elem: gputype.Scalar{Name: x.Elem.Name}}, true
 	case ir.Mat:
-		return fmt.Sprintf("mat%dx%d<%s>", x.Cols, x.Rows, x.Elem.Name)
+		return gputype.Mat{Cols: x.Cols, Rows: x.Rows, Elem: gputype.Scalar{Name: x.Elem.Name}}, true
 	case ir.Array:
-		if x.Len == 0 {
-			return fmt.Sprintf("array<%s>", typeName(x.Elem))
+		elem, ok := elioTypeToGPU(x.Elem)
+		if !ok {
+			return nil, false
 		}
-		return fmt.Sprintf("array<%s, %d>", typeName(x.Elem), x.Len)
+		return gputype.Array{Elem: elem, Len: x.Len}, true
+	}
+	return nil, false
+}
+
+func typeName(t ir.Type) string {
+	if gt, ok := elioTypeToGPU(t); ok {
+		return wgslDialect.TypeName(gt)
+	}
+	// Atomic, Named, and Array-of-those are not modelled by prism/gputype —
+	// spell them locally.
+	switch x := t.(type) {
 	case ir.Atomic:
 		return fmt.Sprintf("atomic<%s>", x.Elem.Name)
 	case ir.Named:
 		return x.Name
+	case ir.Array:
+		// Element type is Atomic or Named (prism can't handle it).
+		if x.Len == 0 {
+			return fmt.Sprintf("array<%s>", typeName(x.Elem))
+		}
+		return fmt.Sprintf("array<%s, %d>", typeName(x.Elem), x.Len)
 	}
 	return "/* unknown type */"
 }

@@ -17,7 +17,12 @@ import (
 	"strings"
 
 	"m31labs.dev/elio/ir"
+	"m31labs.dev/prism/dialect"
+	"m31labs.dev/prism/gputype"
 )
+
+// glslDialect is desktop GLSL (#version 450) — not GLES.
+var glslDialect = dialect.GLSL{}
 
 // Emit renders m as a #version 450 GLSL compute source string.
 func Emit(m *ir.Module) (string, error) {
@@ -439,42 +444,45 @@ func safe(name string) string {
 	return name
 }
 
-func typeName(t ir.Type) string {
+// elioTypeToGPU converts ir.Scalar/Vec/Mat/Array to the equivalent gputype.Type.
+// Returns (type, true) for the four prism-handled kinds; (nil, false) for
+// ir.Atomic and ir.Named, which are spelled locally in typeName.
+func elioTypeToGPU(t ir.Type) (gputype.Type, bool) {
 	switch x := t.(type) {
 	case ir.Scalar:
-		switch x.Name {
-		case "f32":
-			return "float"
-		case "u32":
-			return "uint"
-		case "i32":
-			return "int"
-		default:
-			return x.Name
-		}
+		return gputype.Scalar{Name: x.Name}, true
 	case ir.Vec:
-		switch x.Elem.Name {
-		case "u32":
-			return fmt.Sprintf("uvec%d", x.N)
-		case "i32":
-			return fmt.Sprintf("ivec%d", x.N)
-		default:
-			return fmt.Sprintf("vec%d", x.N)
-		}
+		return gputype.Vec{N: x.N, Elem: gputype.Scalar{Name: x.Elem.Name}}, true
 	case ir.Mat:
-		if x.Cols == x.Rows {
-			return fmt.Sprintf("mat%d", x.Cols)
+		return gputype.Mat{Cols: x.Cols, Rows: x.Rows, Elem: gputype.Scalar{Name: x.Elem.Name}}, true
+	case ir.Array:
+		elem, ok := elioTypeToGPU(x.Elem)
+		if !ok {
+			return nil, false
 		}
-		return fmt.Sprintf("mat%dx%d", x.Cols, x.Rows)
+		return gputype.Array{Elem: elem, Len: x.Len}, true
+	}
+	return nil, false
+}
+
+func typeName(t ir.Type) string {
+	if gt, ok := elioTypeToGPU(t); ok {
+		return glslDialect.TypeName(gt)
+	}
+	// Atomic, Named, and Array-of-those are not modelled by prism/gputype —
+	// spell them locally.
+	// Atomic in GLSL uses the underlying scalar type (atomicAdd takes uint/int).
+	switch x := t.(type) {
 	case ir.Atomic:
 		return typeName(x.Elem)
+	case ir.Named:
+		return x.Name
 	case ir.Array:
+		// Element type is Atomic or Named (prism can't handle it).
 		if x.Len == 0 {
 			return typeName(x.Elem)
 		}
 		return fmt.Sprintf("%s[%d]", typeName(x.Elem), x.Len)
-	case ir.Named:
-		return x.Name
 	}
 	return "/* unknown type */"
 }
