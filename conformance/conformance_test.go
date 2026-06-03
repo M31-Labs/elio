@@ -7,11 +7,10 @@
 package conformance
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	prismvalidate "m31labs.dev/prism/validate"
 
 	"m31labs.dev/elio/emit/glsl"
 	"m31labs.dev/elio/emit/metal"
@@ -31,13 +30,13 @@ func TestScaleBiasAllBackends(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wgsl.Emit: %v", err)
 	}
-	validate(t, "naga", "scale.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
 		t.Fatalf("glsl.Emit: %v", err)
 	}
-	validate(t, "glslangValidator", "scale.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 
 	msrc, err := metal.Emit(mod)
 	if err != nil {
@@ -80,13 +79,13 @@ func TestCullAllBackends(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wgsl.Emit: %v", err)
 	}
-	validate(t, "naga", "cull.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
 		t.Fatalf("glsl.Emit: %v", err)
 	}
-	validate(t, "glslangValidator", "cull.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 
 	msrc, err := metal.Emit(mod)
 	if err != nil {
@@ -120,7 +119,7 @@ func TestReduceEmits(t *testing.T) {
 	if !strings.Contains(wsrc, "var<workgroup> scratch") || !strings.Contains(wsrc, "workgroupBarrier()") {
 		t.Errorf("wgsl missing shared/barrier:\n%s", wsrc)
 	}
-	validate(t, "naga", "reduce.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
@@ -129,7 +128,7 @@ func TestReduceEmits(t *testing.T) {
 	if !strings.Contains(gsrc, "shared float scratch[64];") || !strings.Contains(gsrc, "barrier();") {
 		t.Errorf("glsl missing shared/barrier:\n%s", gsrc)
 	}
-	validate(t, "glslangValidator", "reduce.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 
 	msrc, err := metal.Emit(mod)
 	if err != nil {
@@ -156,13 +155,13 @@ func TestScanEmits(t *testing.T) {
 	if !strings.Contains(wsrc, "var<workgroup> temp") || !strings.Contains(wsrc, "workgroupBarrier()") {
 		t.Errorf("wgsl missing shared/barrier:\n%s", wsrc)
 	}
-	validate(t, "naga", "scan.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
 		t.Fatalf("glsl.Emit: %v", err)
 	}
-	validate(t, "glslangValidator", "scan.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 
 	msrc, err := metal.Emit(mod)
 	if err != nil {
@@ -183,12 +182,12 @@ func TestCompactEmits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wgsl.Emit: %v", err)
 	}
-	validate(t, "naga", "compact.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
 		t.Fatalf("glsl.Emit: %v", err)
 	}
-	validate(t, "glslangValidator", "compact.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 	if _, err := metal.Emit(mod); err != nil {
 		t.Fatalf("metal.Emit: %v", err)
 	}
@@ -203,12 +202,12 @@ func TestSortEmits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wgsl.Emit: %v", err)
 	}
-	validate(t, "naga", "sort.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
 		t.Fatalf("glsl.Emit: %v", err)
 	}
-	validate(t, "glslangValidator", "sort.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 	if _, err := metal.Emit(mod); err != nil {
 		t.Fatalf("metal.Emit: %v", err)
 	}
@@ -224,12 +223,12 @@ func TestParticleUpdateEmits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wgsl.Emit: %v", err)
 	}
-	validate(t, "naga", "particles.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
 		t.Fatalf("glsl.Emit: %v", err)
 	}
-	validate(t, "glslangValidator", "particles.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 	if _, err := metal.Emit(mod); err != nil {
 		t.Fatalf("metal.Emit: %v", err)
 	}
@@ -244,12 +243,12 @@ func TestHiZEmits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wgsl.Emit: %v", err)
 	}
-	validate(t, "naga", "hiz.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
 		t.Fatalf("glsl.Emit: %v", err)
 	}
-	validate(t, "glslangValidator", "hiz.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 	if _, err := metal.Emit(mod); err != nil {
 		t.Fatalf("metal.Emit: %v", err)
 	}
@@ -265,37 +264,14 @@ func TestSkinEmits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wgsl.Emit: %v", err)
 	}
-	validate(t, "naga", "skin.wgsl", wsrc, func(f string) []string { return []string{f} })
+	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 	gsrc, err := glsl.Emit(mod)
 	if err != nil {
 		t.Fatalf("glsl.Emit: %v", err)
 	}
-	validate(t, "glslangValidator", "skin.comp", gsrc, func(f string) []string { return []string{"-V", f, "-S", "comp"} })
+	prismvalidate.Shader(t, "glslangValidator", gsrc, ".comp", func(f string) []string { return []string{"-V", f, "-S", "comp"} })
 	if _, err := metal.Emit(mod); err != nil {
 		t.Fatalf("metal.Emit: %v", err)
-	}
-}
-
-func validate(t *testing.T, bin, fname, src string, args func(string) []string) {
-	t.Helper()
-	path, err := exec.LookPath(bin)
-	if err != nil {
-		t.Logf("%s: skipped (not installed)", bin)
-		return
-	}
-	dir := t.TempDir()
-	f := filepath.Join(dir, fname)
-	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(path, args(f)...)
-	cmd.Dir = dir // contain any default output (e.g. glslang's comp.spv) to the tempdir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s validation failed: %v\n%s\n--- source ---\n%s", bin, err, out, src)
-	}
-	if strings.Contains(string(out), "ERROR") {
-		t.Errorf("%s reported errors:\n%s", bin, out)
 	}
 }
 
