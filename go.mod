@@ -18,7 +18,7 @@ require (
 )
 
 require (
-	m31labs.dev/eos v0.1.1
+	m31labs.dev/eos v0.1.2
 	m31labs.dev/selena v0.0.0
 )
 
