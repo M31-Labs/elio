@@ -16,9 +16,9 @@ import (
 	"fmt"
 	"strings"
 
+	"m31labs.dev/elio/emit/internal/prismtypes"
 	"m31labs.dev/elio/ir"
 	"m31labs.dev/prism/dialect"
-	"m31labs.dev/prism/gputype"
 )
 
 // glslDialect is desktop GLSL (#version 450) — not GLES.
@@ -444,29 +444,8 @@ func safe(name string) string {
 	return name
 }
 
-// elioTypeToGPU converts ir.Scalar/Vec/Mat/Array to the equivalent gputype.Type.
-// Returns (type, true) for the four prism-handled kinds; (nil, false) for
-// ir.Atomic and ir.Named, which are spelled locally in typeName.
-func elioTypeToGPU(t ir.Type) (gputype.Type, bool) {
-	switch x := t.(type) {
-	case ir.Scalar:
-		return gputype.Scalar{Name: x.Name}, true
-	case ir.Vec:
-		return gputype.Vec{N: x.N, Elem: gputype.Scalar{Name: x.Elem.Name}}, true
-	case ir.Mat:
-		return gputype.Mat{Cols: x.Cols, Rows: x.Rows, Elem: gputype.Scalar{Name: x.Elem.Name}}, true
-	case ir.Array:
-		elem, ok := elioTypeToGPU(x.Elem)
-		if !ok {
-			return nil, false
-		}
-		return gputype.Array{Elem: elem, Len: x.Len}, true
-	}
-	return nil, false
-}
-
 func typeName(t ir.Type) string {
-	if gt, ok := elioTypeToGPU(t); ok {
+	if gt, ok := prismtypes.FromIR(t); ok {
 		return glslDialect.TypeName(gt)
 	}
 	// Atomic, Named, and Array-of-those are not modelled by prism/gputype —
