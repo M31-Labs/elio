@@ -19,11 +19,14 @@ selena.commit
 selena.bench.jsonl
 eos.commit
 eos.bench.jsonl
+summary.md
+summary.tsv
 ```
 
 Each `*.bench.jsonl` file is raw `go test -json` output with benchmark lines
 and allocation data. Keep the raw JSONL rather than a lossy summary so future
 comparison tooling can choose p50, min, or other policy after a few runs exist.
+The generated summaries use median values across repeated benchmark samples.
 
 Useful knobs:
 
@@ -33,6 +36,14 @@ TRIAD_BENCH_TIME=3s scripts/gpu-triad-bench.sh
 TRIAD_BENCH_REGEX='Benchmark(Parse|Emit|Build)' scripts/gpu-triad-bench.sh
 TRIAD_BENCH_REGEX=Benchmark scripts/gpu-triad-bench.sh
 TRIAD_BENCH_OUT=/tmp/triad-bench scripts/gpu-triad-bench.sh
+```
+
+To summarize an existing run or compare it to a baseline:
+
+```sh
+go run ./scripts/gpu_triad_bench_summary.go docs/benchmarks/<run-id>
+go run ./scripts/gpu_triad_bench_summary.go --baseline docs/benchmarks/<baseline-id> docs/benchmarks/<run-id>
+go run ./scripts/gpu_triad_bench_summary.go --format tsv docs/benchmarks/<run-id>
 ```
 
 The default regex is bounded to parser, emitter, CPU fallback, compile, and

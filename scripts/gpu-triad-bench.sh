@@ -35,4 +35,7 @@ for repo in elio selena eos; do
   ) | tee "$out_dir/$repo.bench.jsonl"
 done
 
+go run "$script_dir/gpu_triad_bench_summary.go" "$out_dir" >"$out_dir/summary.md"
+go run "$script_dir/gpu_triad_bench_summary.go" --format tsv "$out_dir" >"$out_dir/summary.tsv"
+
 echo "wrote triad benchmark run: $out_dir"
