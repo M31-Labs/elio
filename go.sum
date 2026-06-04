@@ -4,3 +4,5 @@ github.com/orisano/pixelmatch v0.0.0-20220722002657-fb0b55479cde h1:x0TT0RDC7UhA
 github.com/orisano/pixelmatch v0.0.0-20220722002657-fb0b55479cde/go.mod h1:nZgzbfBr3hhjoZnS66nKrHmduYNpc34ny7RK4z5/HM0=
 m31labs.dev/prism v0.1.0 h1:5KRsHuLH4qQvVaYtUn2VIwGZ0/VjbVscxJ5/xkEQWe0=
 m31labs.dev/prism v0.1.0/go.mod h1:y3Eg5GDXRB6G0rNIPOOnmFXpmZGjy4eOjyDMORyWHf8=
+m31labs.dev/prism v0.1.1 h1:YdCtvTCI7stHub7UzZHAp2DlS1uQWT4GjC26VNLkWb0=
+m31labs.dev/prism v0.1.1/go.mod h1:y3Eg5GDXRB6G0rNIPOOnmFXpmZGjy4eOjyDMORyWHf8=

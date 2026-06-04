@@ -20,7 +20,11 @@ import (
 
 const usage = `usage:
   elio emit <wgsl|glsl|metal> <file.elio>   emit shader source to stdout
-  elio check <file.elio>                    parse + semantic-check the source`
+  elio check <file.elio>                    parse + semantic-check the source
+  elio graph [--format json|dot] <file.elio>
+  elio kernels [--target wgsl|glsl|metal] [--out dir] [--validate] <file.elio>
+  elio compile --bundle dir [--validate-kernels] <file.elio>
+  elio doctor`
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -47,6 +51,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stdout, "ok")
 		return 0
+	case "graph":
+		return runGraph(args[1:], stdout, stderr)
+	case "kernels":
+		return runKernels(args[1:], stdout, stderr)
+	case "compile":
+		return runCompile(args[1:], stdout, stderr)
+	case "doctor":
+		return runDoctor(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, usage)
 		return 2
