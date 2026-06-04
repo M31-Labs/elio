@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/odvcencio/gotreesitter v0.20.1
-	m31labs.dev/gosx v0.24.0
+	m31labs.dev/gosx v0.25.2
 	m31labs.dev/prism v0.1.1
 )
 
@@ -19,9 +19,5 @@ require (
 
 require (
 	m31labs.dev/eos v0.1.3
-	m31labs.dev/selena v0.0.0
+	m31labs.dev/selena v0.1.0
 )
-
-replace m31labs.dev/gosx => ../gosx
-
-replace m31labs.dev/selena => ../selena
