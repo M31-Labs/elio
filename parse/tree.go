@@ -18,7 +18,7 @@ import (
 // Parse parses Elio source into an ir.Module using the grammargen-generated
 // tree-sitter grammar (grammar.ElioGrammar).
 func Parse(src string) (*ir.Module, error) {
-	root, tw, err := taproot.Parse("elio", grammar.ElioGrammar, []byte(src))
+	root, tw, err := taproot.ParseFromBlob("elio", grammarBlob, grammar.ElioGrammar, []byte(src))
 	if err != nil {
 		return nil, err
 	}
