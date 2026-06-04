@@ -46,7 +46,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if _, err := loadModule(args[1]); err != nil {
-			fmt.Fprintln(stderr, err)
+			printCommandError(stderr, err)
 			return 1
 		}
 		fmt.Fprintln(stdout, "ok")
@@ -74,10 +74,10 @@ func loadModule(path string) (*ir.Module, error) {
 	}
 	mod, err := parse.Parse(string(src))
 	if err != nil {
-		return nil, err
+		return nil, attachSource(path, src, err)
 	}
 	if err := sema.Errors(sema.Check(mod)); err != nil {
-		return nil, err
+		return nil, attachSource(path, src, err)
 	}
 	return mod, nil
 }
@@ -85,7 +85,7 @@ func loadModule(path string) (*ir.Module, error) {
 func emit(target, path string, stdout, stderr io.Writer) int {
 	mod, err := loadModule(path)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	var out string
@@ -101,7 +101,7 @@ func emit(target, path string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	fmt.Fprint(stdout, out)

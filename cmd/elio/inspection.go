@@ -69,14 +69,14 @@ func runGraph(args []string, stdout, stderr io.Writer) int {
 	}
 	mod, err := loadModule(fs.Arg(0))
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	report := newGraphReport(fs.Arg(0), mod)
 	switch *format {
 	case "json":
 		if err := writeJSON(stdout, report); err != nil {
-			fmt.Fprintln(stderr, err)
+			printCommandError(stderr, err)
 			return 1
 		}
 	case "dot":
@@ -169,17 +169,17 @@ func runKernels(args []string, stdout, stderr io.Writer) int {
 	}
 	mod, err := loadModule(fs.Arg(0))
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	manifest, err := writeTargetSources(mod, *outDir, *targetFilter, "", *validateSources)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	manifest.SourcePath = fs.Arg(0)
 	if err := writeJSONFile(filepath.Join(*outDir, "manifest.json"), manifest); err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "wrote %d target source(s) -> %s\n", manifest.SourceCount, *outDir)
@@ -201,16 +201,16 @@ func runCompile(args []string, stdout, stderr io.Writer) int {
 	srcPath := fs.Arg(0)
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	mod, err := loadModule(srcPath)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	if err := writeCompileBundle(*bundleDir, srcPath, src, mod, *validateSources); err != nil {
-		fmt.Fprintln(stderr, err)
+		printCommandError(stderr, err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "bundle: %s\n", *bundleDir)

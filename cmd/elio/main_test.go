@@ -65,6 +65,27 @@ func TestCheckAndErrors(t *testing.T) {
 	}
 }
 
+func TestCheckRendersSourceDiagnostic(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "bad.elio")
+	src := `@workgroup(1) kernel main() {
+  let x = missing;
+}
+`
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := run([]string{"check", f}, &out, &errb); code != 1 {
+		t.Fatalf("check: want exit 1, got %d; stdout=%q stderr=%q", code, out.String(), errb.String())
+	}
+	for _, want := range []string{"ELIO1001 error", "--> " + f + ":2:", "let x = missing;", "^", "hint:"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("diagnostic output missing %q\n--- stderr ---\n%s", want, errb.String())
+		}
+	}
+}
+
 func TestGraphPrintsJSON(t *testing.T) {
 	f := writeSample(t)
 	var out, errb bytes.Buffer
