@@ -51,7 +51,17 @@ func GalaxyParticleUpdate() *ir.Module {
 	fv := name("fv")
 	kind := name("kind")
 
-	// One loop iteration: read force fi, branch on kind, accumulate.
+	v3 := func(xs ...ir.Expr) ir.Expr { return call("vec3", xs...) }
+	dotSelf := func(e ir.Expr) ir.Expr { return call("dot", e, e) } // |e|^2
+	// isZeroVec mirrors GoSX's vec3OrDefault threshold (dot(v,v) <= 1e-8).
+	isZeroVec := func(e ir.Expr) ir.Expr { return bin("<=", dotSelf(e), lit("0.00000001")) }
+
+	// One loop iteration: read force fi, branch on kind, accumulate. This is a
+	// bit-faithful inline of GoSX's particleUpdateWGSL force graph, including
+	// vec3OrDefault fallbacks (gravity/wind/vortex) and the degenerate guards
+	// (attractor |delta|, vortex |radial|, turbulence freq==0) — required for
+	// parity with the real galaxy forces, which often leave the direction zero
+	// and rely on those defaults.
 	forceBody := []ir.Stmt{
 		letS("force", idx(u("forces"), name("fi"))),
 		letS("kind", force2("cfg", "x")),
@@ -59,23 +69,39 @@ func GalaxyParticleUpdate() *ir.Module {
 		letS("fv", force2("vector", "xyz")),
 		// drag (2): accumulate the scalar drag coefficient.
 		ir.If{Cond: inRange(kind, "1.5", "2.5"), Then: []ir.Stmt{addTo(name("drag"), strength)}},
-		// gravity (1) and wind (3): a constant directional acceleration.
-		ir.If{Cond: inRange(kind, "0.5", "1.5"), Then: []ir.Stmt{addTo(accel, bin("*", fv, strength))}},
-		ir.If{Cond: inRange(kind, "2.5", "3.5"), Then: []ir.Stmt{addTo(accel, bin("*", fv, strength))}},
-		// attractor (4): pull toward the target point fv.
+		// gravity (1): vec3OrDefault(fv, (0,-1,0)) * strength.
+		ir.If{Cond: inRange(kind, "0.5", "1.5"), Then: []ir.Stmt{
+			ir.Var{Name: "gdir", Init: fv},
+			ir.If{Cond: isZeroVec(fv), Then: []ir.Stmt{set(name("gdir"), v3(lit("0.0"), lit("-1.0"), lit("0.0")))}},
+			addTo(accel, bin("*", name("gdir"), strength)),
+		}},
+		// wind (3): vec3OrDefault(fv, (1,0,0)) * strength.
+		ir.If{Cond: inRange(kind, "2.5", "3.5"), Then: []ir.Stmt{
+			ir.Var{Name: "wdir", Init: fv},
+			ir.If{Cond: isZeroVec(fv), Then: []ir.Stmt{set(name("wdir"), v3(lit("1.0"), lit("0.0"), lit("0.0")))}},
+			addTo(accel, bin("*", name("wdir"), strength)),
+		}},
+		// attractor (4): pull toward target fv, skipping the degenerate case.
 		ir.If{Cond: inRange(kind, "3.5", "4.5"), Then: []ir.Stmt{
 			letS("delta", bin("-", fv, pos)),
-			addTo(accel, bin("*", call("normalize", name("delta")), strength)),
+			ir.If{Cond: bin(">", dotSelf(name("delta")), lit("0.00000001")), Then: []ir.Stmt{
+				addTo(accel, bin("*", call("normalize", name("delta")), strength)),
+			}},
 		}},
-		// vortex / orbit (5): tangential force around axis fv.
+		// vortex / orbit (5): tangential force around vec3OrDefault(fv,(0,1,0)).
 		ir.If{Cond: inRange(kind, "4.5", "5.5"), Then: []ir.Stmt{
-			letS("axis", call("normalize", fv)),
+			ir.Var{Name: "ax", Init: fv},
+			ir.If{Cond: isZeroVec(fv), Then: []ir.Stmt{set(name("ax"), v3(lit("0.0"), lit("1.0"), lit("0.0")))}},
+			letS("axis", call("normalize", name("ax"))),
 			letS("radial", bin("-", pos, bin("*", name("axis"), call("dot", pos, name("axis"))))),
-			addTo(accel, bin("*", call("normalize", call("cross", name("radial"), name("axis"))), strength)),
+			ir.If{Cond: bin(">", dotSelf(name("radial")), lit("0.00000001")), Then: []ir.Stmt{
+				addTo(accel, bin("*", call("normalize", call("cross", name("radial"), name("axis"))), strength)),
+			}},
 		}},
-		// turbulence (6): a curl-ish sin/cos field at frequency cfg.z.
+		// turbulence (6): curl-ish sin/cos field at frequency cfg.z (0 ⇒ 1).
 		ir.If{Cond: inRange(kind, "5.5", "6.5"), Then: []ir.Stmt{
-			letS("freq", call("abs", force2("cfg", "z"))),
+			ir.Var{Name: "freq", Init: call("abs", force2("cfg", "z"))},
+			ir.If{Cond: bin("<=", name("freq"), lit("0.000001")), Then: []ir.Stmt{set(name("freq"), lit("1.0"))}},
 			letS("nx", bin("*",
 				call("sin", bin("+", bin("*", mem(pos, "x"), name("freq")), bin("*", u("time"), lit("1.3")))),
 				call("cos", bin("+", bin("*", mem(pos, "z"), name("freq")), bin("*", u("time"), lit("0.7")))))),
@@ -85,7 +111,7 @@ func GalaxyParticleUpdate() *ir.Module {
 			letS("nz", bin("*",
 				call("sin", bin("+", bin("*", mem(pos, "z"), name("freq")), bin("*", u("time"), lit("1.7")))),
 				call("cos", bin("+", bin("*", mem(pos, "y"), name("freq")), bin("*", u("time"), lit("0.5")))))),
-			addTo(accel, bin("*", call("vec3", name("nx"), name("ny"), name("nz")), strength)),
+			addTo(accel, bin("*", v3(name("nx"), name("ny"), name("nz")), strength)),
 		}},
 	}
 
@@ -126,7 +152,6 @@ func GalaxyParticleUpdate() *ir.Module {
 		result := call("fract", bin("*", bin("+", mem(name(b), "x"), mem(name(b), "y")), mem(name(b), "z")))
 		return stmts, result
 	}
-	v3 := func(xs ...ir.Expr) ir.Expr { return call("vec3", xs...) }
 	seed := name("seed")
 	h1s, h1 := hash13(seed)
 	h2s, h2 := hash13(bin("+", seed, v3(lit("1.7"), lit("2.3"), lit("3.1"))))
