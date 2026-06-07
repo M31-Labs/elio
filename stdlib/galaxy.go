@@ -1,6 +1,10 @@
 package stdlib
 
-import "m31labs.dev/elio/ir"
+import (
+	"fmt"
+
+	"m31labs.dev/elio/ir"
+)
 
 // GalaxyParticleUpdate is the galaxy star/particle integrator authored once in
 // Elio — the per-frame compute step that drives m31labs.dev's galaxy. It is the
@@ -103,27 +107,46 @@ func GalaxyParticleUpdate() *ir.Module {
 		set(p("velocity"), call("vec4", name("newVel"), p2("velocity", "w"))),
 	}
 
-	// Respawn: hash the index+time for a pseudo-random direction, emit at the
-	// emitter position offset by the emitter radius, with the configured speed.
-	hash := func(seed string) ir.Expr {
-		return call("fract", bin("*", call("sin", bin("+", bin("*", name("fid"), lit(seed)), u("time"))), lit("43758.5453")))
+	// Respawn at the emitter with a pseudo-random direction. This inlines
+	// GoSX's exact hash13 (Elio has no user functions yet) so the respawn
+	// distribution is bit-for-bit the same function as particleUpdateWGSL —
+	// required for true drop-in parity, not just "equivalent randomness".
+	//
+	//   hash13(p): p3 = fract(p*0.1031); p3 += dot(p3, p3.yzx + 33.33);
+	//              return fract((p3.x + p3.y) * p3.z)
+	hashCount := 0
+	hash13 := func(arg ir.Expr) ([]ir.Stmt, ir.Expr) {
+		hashCount++
+		a := fmt.Sprintf("h3a%d", hashCount)
+		b := fmt.Sprintf("h3b%d", hashCount)
+		stmts := []ir.Stmt{
+			letS(a, call("fract", bin("*", arg, lit("0.1031")))),
+			letS(b, bin("+", name(a), call("dot", name(a), bin("+", mem(name(a), "yzx"), lit("33.33"))))),
+		}
+		result := call("fract", bin("*", bin("+", mem(name(b), "x"), mem(name(b), "y")), mem(name(b), "z")))
+		return stmts, result
 	}
-	respawn := []ir.Stmt{
-		letS("fid", call("f32", name("i"))),
-		letS("ha", hash("12.9898")),
-		letS("hb", hash("78.233")),
-		letS("hc", hash("37.719")),
-		letS("dir", call("normalize", call("vec3",
-			bin("-", bin("*", name("ha"), lit("2.0")), lit("1.0")),
-			bin("+", bin("*", name("hb"), lit("0.4")), lit("0.3")),
-			bin("-", bin("*", name("hc"), lit("2.0")), lit("1.0"))))),
-		letS("off", bin("*", call("vec3",
-			bin("-", bin("*", name("ha"), lit("2.0")), lit("1.0")),
-			bin("-", bin("*", name("hb"), lit("2.0")), lit("1.0")),
-			bin("-", bin("*", name("hc"), lit("2.0")), lit("1.0"))), u2("emitterPos", "w"))),
+	v3 := func(xs ...ir.Expr) ir.Expr { return call("vec3", xs...) }
+	seed := name("seed")
+	h1s, h1 := hash13(seed)
+	h2s, h2 := hash13(bin("+", seed, v3(lit("1.7"), lit("2.3"), lit("3.1"))))
+	h3s, h3 := hash13(bin("+", seed, v3(lit("4.1"), lit("5.3"), lit("6.7"))))
+	h4s, h4 := hash13(bin("+", seed, v3(lit("9.1"), lit("3.3"), lit("7.7"))))
+
+	respawn := []ir.Stmt{letS("seed", v3(call("f32", name("i")), u("time"), bin("*", u("time"), lit("1.37"))))}
+	respawn = append(respawn, h1s...)
+	respawn = append(respawn, letS("rx", bin("-", bin("*", h1, lit("2.0")), lit("1.0"))))
+	respawn = append(respawn, h2s...)
+	respawn = append(respawn, letS("ry", h2))
+	respawn = append(respawn, h3s...)
+	respawn = append(respawn, letS("rz", bin("-", bin("*", h3, lit("2.0")), lit("1.0"))))
+	respawn = append(respawn, h4s...)
+	respawn = append(respawn,
+		letS("dir", call("normalize", v3(name("rx"), bin("+", bin("*", name("ry"), lit("0.4")), lit("0.3")), name("rz")))),
+		letS("off", bin("*", v3(name("rx"), bin("-", bin("*", h4, lit("2.0")), lit("1.0")), name("rz")), u2("emitterPos", "w"))),
 		set(p("position"), call("vec4", bin("+", u2("emitterPos", "xyz"), name("off")), lit("0.0"))),
 		set(p("velocity"), call("vec4", bin("*", name("dir"), u2("initialSpeed", "x")), u("lifetime"))),
-	}
+	)
 
 	body := []ir.Stmt{
 		letS("i", mem(name("gid"), "x")),
