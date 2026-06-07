@@ -31,8 +31,17 @@ type Config struct {
 	// allocates). Required.
 	Buffers func(binding string) (gpu.Buffer, bool)
 	// Groups returns the workgroup dispatch counts for the frame. Defaults to
-	// (1,1,1) when nil.
+	// (1,1,1) when nil. Ignored when IndirectArgs supplies a GPU-driven count.
 	Groups func() (x, y, z int)
+	// IndirectArgs, when non-nil and returning ok, makes the pass dispatch with a
+	// GPU-driven workgroup count: GoSX reads the count (3×u32) from buf at the
+	// given byte offset via DispatchWorkgroupsIndirect, instead of the
+	// CPU-supplied Groups. The buffer must be created with gpu.BufferUsageIndirect
+	// and is typically produced by a prior pass (e.g. a cull/compaction that
+	// atomically counts surviving work) — this is the compute-drives-compute /
+	// compute-drives-draw seam where the count never round-trips to the CPU. When
+	// IndirectArgs is nil or returns ok=false, Groups (or (1,1,1)) is used.
+	IndirectArgs func() (buf gpu.Buffer, offset int, ok bool)
 	// Publish lists resources to announce on the bus after the dispatch, so later
 	// passes and the draw can resolve them by name.
 	Publish []compute.GPUResource
@@ -127,15 +136,33 @@ func (p *Pass) Record(ctx compute.PassContext) error {
 		}
 		pass.SetBindGroup(g, bg)
 	}
-	x, y, z := 1, 1, 1
-	if p.cfg.Groups != nil {
-		x, y, z = p.cfg.Groups()
+	if buf, off, ok := p.indirectArgs(); ok {
+		if buf == nil {
+			pass.End()
+			return fmt.Errorf("elio/gosx: %s: IndirectArgs returned ok with a nil buffer", p.cfg.ID)
+		}
+		pass.DispatchWorkgroupsIndirect(buf, off)
+	} else {
+		x, y, z := 1, 1, 1
+		if p.cfg.Groups != nil {
+			x, y, z = p.cfg.Groups()
+		}
+		pass.DispatchWorkgroups(x, y, z)
 	}
-	pass.DispatchWorkgroups(x, y, z)
 	pass.End()
 
 	for _, r := range p.cfg.Publish {
 		ctx.Publish(r)
 	}
 	return nil
+}
+
+// indirectArgs resolves the GPU-driven dispatch buffer for this frame, if the
+// caller configured one. Returns ok=false when dispatch should use CPU-supplied
+// counts (Config.Groups).
+func (p *Pass) indirectArgs() (gpu.Buffer, int, bool) {
+	if p.cfg.IndirectArgs == nil {
+		return nil, 0, false
+	}
+	return p.cfg.IndirectArgs()
 }
