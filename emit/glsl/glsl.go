@@ -319,11 +319,15 @@ func (e *emitter) call(c ir.Call) string {
 			return fmt.Sprintf("atomicAdd(%s, %s)", e.expr(c.Args[0]), e.expr(c.Args[1]))
 		}
 	}
+	fn := c.Func
+	if n, elem, ok := ir.VecConstructor(c.Func); ok {
+		fn = typeName(ir.Vec{N: n, Elem: elem}) // vec3 / uvec3 / ivec3
+	}
 	args := make([]string, len(c.Args))
 	for i, a := range c.Args {
 		args[i] = e.expr(a)
 	}
-	return fmt.Sprintf("%s(%s)", c.Func, strings.Join(args, ", "))
+	return fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
 }
 
 // --- type inference (GLSL needs concrete decl types) ---
@@ -370,6 +374,9 @@ func (e *emitter) infer(ex ir.Expr) ir.Type {
 		}
 		return e.infer(x.E)
 	case ir.Call:
+		if n, elem, ok := ir.VecConstructor(x.Func); ok {
+			return ir.Vec{N: n, Elem: elem}
+		}
 		switch x.Func {
 		case "arrayLength":
 			return ir.U32

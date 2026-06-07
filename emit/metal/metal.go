@@ -310,11 +310,15 @@ func call(c ir.Call) string {
 			return fmt.Sprintf("atomic_fetch_add_explicit(%s, %s, memory_order_relaxed)", expr(c.Args[0]), expr(c.Args[1]))
 		}
 	}
+	fn := c.Func
+	if n, elem, ok := ir.VecConstructor(c.Func); ok {
+		fn = typeName(ir.Vec{N: n, Elem: elem}) // float3 / uint3 / int3
+	}
 	args := make([]string, len(c.Args))
 	for i, a := range c.Args {
 		args[i] = expr(a)
 	}
-	return fmt.Sprintf("%s(%s)", c.Func, strings.Join(args, ", "))
+	return fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
 }
 
 func typeName(t ir.Type) string {

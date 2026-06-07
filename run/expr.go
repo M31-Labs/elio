@@ -124,7 +124,39 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		}
 		return b, nil
 	}
+	if n, _, ok := ir.VecConstructor(c.Func); ok {
+		return ev.vecConstruct(n, c.Args)
+	}
 	return nil, fmt.Errorf("run: unsupported call %q", c.Func)
+}
+
+// vecConstruct builds an n-component vector from constructor arguments,
+// flattening vector args (so vec4(xyz, w) works) and splatting a single scalar
+// (so vec3(0.0) works) — mirroring WGSL/GLSL/Metal constructor semantics.
+func (ev *evaluator) vecConstruct(n int, args []ir.Expr) (any, error) {
+	out := make([]float64, 0, n)
+	for _, a := range args {
+		v, err := ev.eval(a)
+		if err != nil {
+			return nil, err
+		}
+		if vec, ok := v.([]float64); ok {
+			out = append(out, vec...)
+		} else {
+			out = append(out, toFloat(v))
+		}
+	}
+	if len(out) == 1 && n > 1 { // splat
+		s := out[0]
+		out = make([]float64, n)
+		for i := range out {
+			out[i] = s
+		}
+	}
+	if len(out) != n {
+		return nil, fmt.Errorf("run: vec%d constructor got %d components", n, len(out))
+	}
+	return out, nil
 }
 
 func (ev *evaluator) addrOf(e ir.Expr) (any, error) {

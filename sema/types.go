@@ -21,6 +21,10 @@ func (c *checker) typeOf(s *scope, e ir.Expr) ir.Type {
 		return c.memberType(c.typeOf(s, e.E), e.Field)
 	case ir.Index:
 		return elementType(c.typeOf(s, e.E))
+	case ir.Call:
+		if n, elem, ok := ir.VecConstructor(e.Func); ok {
+			return ir.Vec{N: n, Elem: elem}
+		}
 	}
 	return nil
 }

@@ -188,7 +188,11 @@ func expr(e ir.Expr) string {
 		for i, a := range x.Args {
 			args[i] = expr(a)
 		}
-		return fmt.Sprintf("%s(%s)", x.Func, strings.Join(args, ", "))
+		fn := x.Func
+		if n, elem, ok := ir.VecConstructor(x.Func); ok {
+			fn = typeName(ir.Vec{N: n, Elem: elem}) // vec3<f32>(…)
+		}
+		return fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
 	case ir.Index:
 		return fmt.Sprintf("%s[%s]", expr(x.E), expr(x.Idx))
 	case ir.Member:
