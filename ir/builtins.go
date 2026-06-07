@@ -36,3 +36,20 @@ func VecConstructor(name string) (n int, elem Scalar, ok bool) {
 	}
 	return n, elem, true
 }
+
+// ScalarCast reports whether name is a scalar conversion — f32/i32/u32(x) — and
+// returns the target scalar type. Casts are required to mix integer loop
+// counters and indices with float uniforms (e.g. `f32(fi) < forceCount`), the
+// pattern every dynamic-count compute loop uses. Each backend spells the
+// conversion in its own dialect (WGSL `f32`, GLSL/Metal `float`/`int`/`uint`).
+func ScalarCast(name string) (Scalar, bool) {
+	switch name {
+	case "f32":
+		return F32, true
+	case "i32":
+		return I32, true
+	case "u32":
+		return U32, true
+	}
+	return Scalar{}, false
+}

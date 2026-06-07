@@ -127,6 +127,12 @@ func litValue(t string) any {
 }
 
 func binop(op string, l, r any) (any, error) {
+	switch op {
+	case "&&":
+		return toBool(l) && toBool(r), nil
+	case "||":
+		return toBool(l) || toBool(r), nil
+	}
 	if isVec(l) || isVec(r) {
 		return vecBinop(op, l, r)
 	}

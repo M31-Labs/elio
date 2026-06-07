@@ -124,8 +124,23 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		}
 		return b, nil
 	}
+	if v, handled, err := ev.mathBuiltin(c); handled {
+		return v, err
+	}
 	if n, _, ok := ir.VecConstructor(c.Func); ok {
 		return ev.vecConstruct(n, c.Args)
+	}
+	if elem, ok := ir.ScalarCast(c.Func); ok {
+		v, err := ev.eval(c.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		f := toFloat(v)
+		switch elem.Name {
+		case "i32", "u32":
+			return int64(f), nil // truncate toward zero, matching GPU int conversion
+		}
+		return f, nil
 	}
 	return nil, fmt.Errorf("run: unsupported call %q", c.Func)
 }

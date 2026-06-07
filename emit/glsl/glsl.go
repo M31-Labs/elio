@@ -322,6 +322,8 @@ func (e *emitter) call(c ir.Call) string {
 	fn := c.Func
 	if n, elem, ok := ir.VecConstructor(c.Func); ok {
 		fn = typeName(ir.Vec{N: n, Elem: elem}) // vec3 / uvec3 / ivec3
+	} else if elem, ok := ir.ScalarCast(c.Func); ok {
+		fn = typeName(elem) // float / int / uint
 	}
 	args := make([]string, len(c.Args))
 	for i, a := range c.Args {
@@ -376,6 +378,9 @@ func (e *emitter) infer(ex ir.Expr) ir.Type {
 	case ir.Call:
 		if n, elem, ok := ir.VecConstructor(x.Func); ok {
 			return ir.Vec{N: n, Elem: elem}
+		}
+		if elem, ok := ir.ScalarCast(x.Func); ok {
+			return elem
 		}
 		switch x.Func {
 		case "arrayLength":

@@ -25,6 +25,9 @@ func (c *checker) typeOf(s *scope, e ir.Expr) ir.Type {
 		if n, elem, ok := ir.VecConstructor(e.Func); ok {
 			return ir.Vec{N: n, Elem: elem}
 		}
+		if elem, ok := ir.ScalarCast(e.Func); ok {
+			return elem
+		}
 	}
 	return nil
 }

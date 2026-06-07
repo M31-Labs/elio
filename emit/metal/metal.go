@@ -313,6 +313,8 @@ func call(c ir.Call) string {
 	fn := c.Func
 	if n, elem, ok := ir.VecConstructor(c.Func); ok {
 		fn = typeName(ir.Vec{N: n, Elem: elem}) // float3 / uint3 / int3
+	} else if elem, ok := ir.ScalarCast(c.Func); ok {
+		fn = typeName(elem) // float / int / uint
 	}
 	args := make([]string, len(c.Args))
 	for i, a := range c.Args {
