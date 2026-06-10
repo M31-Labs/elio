@@ -32,6 +32,16 @@ func (ev *evaluator) execStmt(s ir.Stmt) (flow, error) {
 		if err != nil {
 			return flowNormal, err
 		}
+		// If the variable is explicitly typed as a Named struct and the initial
+		// value came back as a scalar (e.g. from an ir.Lit struct-constructor
+		// placeholder), replace it with an empty map so subsequent field
+		// assignments can target it. The GPU backends emit the literal verbatim
+		// and get a real struct; the CPU interpreter needs the mutable map.
+		if _, isNamed := x.Type.(ir.Named); isNamed {
+			if _, isMap := v.(map[string]any); !isMap {
+				v = map[string]any{}
+			}
+		}
 		ev.locals[x.Name] = v
 	case ir.Assign:
 		v, err := ev.eval(x.Value)

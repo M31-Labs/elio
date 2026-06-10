@@ -167,6 +167,65 @@ func TestRunWhile(t *testing.T) {
 	}
 }
 
+// TestIntMultiplyI32Signed verifies that multiplying two negative i32 values
+// yields the correct positive product (regression for the u32-only wrapping
+// change that zero-extended the result and broke signed multiplies).
+func TestIntMultiplyI32Signed(t *testing.T) {
+	cases := []struct {
+		a, b, want int64
+		name       string
+	}{
+		{-3, -4, 12, "-3 * -4 = 12"},
+		{-1, -1, 1, "-1 * -1 = 1"},
+		{-100, 5, -500, "-100 * 5 = -500"},
+		{7, -8, -56, "7 * -8 = -56"},
+		// i32 min-value wrapping: -2147483648 * -1 overflows i32 → wraps to -2147483648
+		{-2147483648, -1, -2147483648, "i32 min * -1 wraps"},
+	}
+	for _, c := range cases {
+		got, err := intBinop("*", c.a, c.b)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if got.(int64) != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got.(int64), c.want)
+		}
+	}
+}
+
+// TestIntMultiplyU32Wrapping verifies that u32 multiply wraps at 2^32 (low-32
+// truncation), matching GPU u32 semantics used by the browser hash kernel.
+func TestIntMultiplyU32Wrapping(t *testing.T) {
+	// u32 values are represented as non-negative int64 in the interpreter.
+	// The multiply must truncate to 32 bits. Low bits must match expected value.
+	cases := []struct {
+		a, b int64
+		want uint32 // expected low-32 bit pattern
+		name string
+	}{
+		// 0x45d9f3b is the browser hash multiplier; (2^32-1) * 0x45d9f3b mod 2^32
+		// = (0 - 0x45d9f3b) mod 2^32 = 4294967296 - 73244475 = 4221722821 = 0xFBA260C5
+		{0xFFFFFFFF, 0x45d9f3b, 0xFBA260C5, "u32_max * hash_mult"},
+		// (2^32-1)^2 = 2^64 - 2*2^32 + 1; low32 = 1
+		{0xFFFFFFFF, 0xFFFFFFFF, 1, "u32_max squared"},
+		// 0x80000001 * 2 = 0x100000002; low32 = 2
+		{0x80000001, 2, 2, "high_bit_set * 2"},
+	}
+	for _, c := range cases {
+		got, err := intBinop("*", c.a, c.b)
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		// Compare only the low-32 bits — u32 result.
+		gotLow := uint32(got.(int64))
+		if gotLow != c.want {
+			t.Errorf("%s: low32 = 0x%08X, want 0x%08X", c.name, gotLow, c.want)
+		}
+	}
+}
+
 // TestRunConst verifies a module-level constant is evaluated once and readable
 // from a kernel: acc[i] = FACTOR (= 3).
 func TestRunConst(t *testing.T) {

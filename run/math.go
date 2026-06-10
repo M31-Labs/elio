@@ -13,7 +13,9 @@ import (
 // against. Membership-gated so non-math calls fall through to the rest of the
 // dispatch (vector constructors, atomics, error).
 var mathBuiltins = map[string]bool{
-	"sin": true, "cos": true, "tan": true, "sqrt": true, "exp": true,
+	"sin": true, "cos": true, "tan": true, "asin": true, "acos": true, "atan": true,
+	"atan2": true,
+	"sqrt": true, "exp": true,
 	"log": true, "exp2": true, "log2": true, "floor": true, "ceil": true,
 	"fract": true, "abs": true, "sign": true,
 	"pow": true, "step": true, "distance": true, "reflect": true, "cross": true,
@@ -51,6 +53,14 @@ func (ev *evaluator) mathBuiltin(c ir.Call) (any, bool, error) {
 		return mapElem(arg(0), math.Cos), true, nil
 	case "tan":
 		return mapElem(arg(0), math.Tan), true, nil
+	case "asin":
+		return mapElem(arg(0), math.Asin), true, nil
+	case "acos":
+		return mapElem(arg(0), math.Acos), true, nil
+	case "atan":
+		return mapElem(arg(0), math.Atan), true, nil
+	case "atan2":
+		return zip2(arg(0), arg(1), math.Atan2), true, nil
 	case "sqrt":
 		return mapElem(arg(0), math.Sqrt), true, nil
 	case "exp":

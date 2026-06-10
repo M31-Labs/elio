@@ -123,6 +123,24 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 			return a, nil
 		}
 		return b, nil
+	case "select":
+		// select(falseVal, trueVal, cond) — WGSL/GLSL ternary builtin.
+		falseVal, err := ev.eval(c.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		trueVal, err := ev.eval(c.Args[1])
+		if err != nil {
+			return nil, err
+		}
+		cond, err := ev.eval(c.Args[2])
+		if err != nil {
+			return nil, err
+		}
+		if toBool(cond) {
+			return trueVal, nil
+		}
+		return falseVal, nil
 	}
 	if v, handled, err := ev.mathBuiltin(c); handled {
 		return v, err

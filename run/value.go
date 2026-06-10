@@ -122,7 +122,14 @@ func litValue(t string) any {
 		f, _ := strconv.ParseFloat(strings.TrimRight(t, "uif"), 64)
 		return f
 	}
-	n, _ := strconv.ParseInt(strings.TrimRight(t, "uif"), 10, 64)
+	// Strip integer suffixes and allow hex.
+	stripped := strings.TrimRight(t, "uiU")
+	if strings.HasPrefix(stripped, "0x") || strings.HasPrefix(stripped, "0X") {
+		n, _ := strconv.ParseInt(stripped[2:], 16, 64)
+		return n
+	}
+	// Allow leading minus (negative literals like -1.0 handled above via ".").
+	n, _ := strconv.ParseInt(stripped, 10, 64)
 	return n
 }
 
@@ -174,7 +181,20 @@ func intBinop(op string, a, b int64) (any, error) {
 	case "-":
 		return a - b, nil
 	case "*":
-		return a * b, nil
+		// Two's-complement low-32 wrapping multiply. The representation in int64 depends
+		// on whether the operands are signed (i32) or unsigned (u32):
+		//   u32 operands are always non-negative; zero-extend the low 32 bits so that
+		//   subsequent ops (>>, f32 cast) see an int64 in [0, 2^32) — matching GPU u32.
+		//   i32 operands may be negative; sign-extend through int32 so the int64 carries
+		//   the correct signed value (e.g. -3*-4 == 12, 7*-8 == -56).
+		// Since the interpreter stores both types as int64, we distinguish by sign:
+		// if either operand is negative it is an i32 value and sign-extension is used;
+		// u32 values are always non-negative so zero-extension is safe there.
+		low32 := uint32(a) * uint32(b)
+		if a < 0 || b < 0 {
+			return int64(int32(low32)), nil
+		}
+		return int64(low32), nil
 	case "/":
 		if b == 0 {
 			return nil, fmt.Errorf("run: integer divide by zero")
@@ -185,6 +205,22 @@ func intBinop(op string, a, b int64) (any, error) {
 			return nil, fmt.Errorf("run: integer modulo by zero")
 		}
 		return a % b, nil
+	case "^":
+		return a ^ b, nil
+	case "&":
+		return a & b, nil
+	case "|":
+		return a | b, nil
+	case ">>":
+		if b < 0 || b >= 64 {
+			return int64(0), nil
+		}
+		return int64(uint64(a) >> uint(b)), nil
+	case "<<":
+		if b < 0 || b >= 64 {
+			return int64(0), nil
+		}
+		return int64(uint64(a) << uint(b)), nil
 	case "<":
 		return a < b, nil
 	case ">":

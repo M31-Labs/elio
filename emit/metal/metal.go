@@ -309,6 +309,11 @@ func call(c ir.Call) string {
 		if len(c.Args) == 2 {
 			return fmt.Sprintf("atomic_fetch_add_explicit(%s, %s, memory_order_relaxed)", expr(c.Args[0]), expr(c.Args[1]))
 		}
+	case "select":
+		// WGSL select(falseVal, trueVal, cond) → MSL ternary (cond ? trueVal : falseVal).
+		if len(c.Args) == 3 {
+			return fmt.Sprintf("(%s ? %s : %s)", expr(c.Args[2]), expr(c.Args[1]), expr(c.Args[0]))
+		}
 	}
 	fn := c.Func
 	if n, elem, ok := ir.VecConstructor(c.Func); ok {

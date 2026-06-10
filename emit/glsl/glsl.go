@@ -318,6 +318,11 @@ func (e *emitter) call(c ir.Call) string {
 		if len(c.Args) == 2 {
 			return fmt.Sprintf("atomicAdd(%s, %s)", e.expr(c.Args[0]), e.expr(c.Args[1]))
 		}
+	case "select":
+		// WGSL select(falseVal, trueVal, cond) → GLSL ternary (cond ? trueVal : falseVal).
+		if len(c.Args) == 3 {
+			return fmt.Sprintf("(%s ? %s : %s)", e.expr(c.Args[2]), e.expr(c.Args[1]), e.expr(c.Args[0]))
+		}
 	}
 	fn := c.Func
 	if n, elem, ok := ir.VecConstructor(c.Func); ok {
@@ -389,6 +394,11 @@ func (e *emitter) infer(ex ir.Expr) ir.Type {
 			return ir.F32
 		case "atomicAdd":
 			return ir.U32
+		case "select":
+			// select(falseVal, trueVal, cond): type is the value operands' type.
+			if len(x.Args) >= 2 {
+				return e.infer(x.Args[0])
+			}
 		}
 		if len(x.Args) > 0 {
 			return e.infer(x.Args[0])

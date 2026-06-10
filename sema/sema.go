@@ -335,7 +335,8 @@ var builtinArity = map[string]int{
 	"normalize": 1, "length": 1, "arrayLength": 1, "abs": 1, "floor": 1,
 	"ceil": 1, "fract": 1, "sqrt": 1, "sin": 1, "cos": 1, "tan": 1, "exp": 1,
 	"log": 1, "exp2": 1, "log2": 1, "sign": 1,
-	"clamp": 3, "mix": 3, "smoothstep": 3,
+	"clamp": 3, "mix": 3, "smoothstep": 3, "select": 3,
+	"asin": 1, "acos": 1, "atan": 1, "atan2": 2,
 	"atomicAdd": 2, "atomicSub": 2, "atomicMax": 2, "atomicMin": 2,
 	"atomicExchange": 2, "atomicStore": 2, "atomicLoad": 1,
 }
