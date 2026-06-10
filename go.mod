@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/odvcencio/gotreesitter v0.20.1
-	m31labs.dev/gosx v0.25.2
+	m31labs.dev/gosx v0.25.10
 	m31labs.dev/prism v0.1.2
 )
 
