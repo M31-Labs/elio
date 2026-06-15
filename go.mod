@@ -21,3 +21,5 @@ require (
 	m31labs.dev/eos v0.1.4
 	m31labs.dev/selena v0.1.1
 )
+
+replace m31labs.dev/gosx => ../gosx // feat/browser-gpu-cull: ComputeExecutor registry
