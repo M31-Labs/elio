@@ -1,6 +1,8 @@
 // Package parse is Elio's front-end: it parses .elio compute source into an
-// ir.Module using the grammargen/gotreesitter grammar (grammar.ElioGrammar) —
-// the house-style parser shared with Selena and Manta.
+// ir.Module. It loads the Elio tree-sitter language from the embedded
+// pre-generated parse table (grammar.bin) via the grammar-free taproot/walk, so
+// this package does not link grammargen or the grammars registry. The grammar
+// DSL used to regenerate the blob lives in the elio/grammar subpackage.
 package parse
 
 import (
@@ -9,16 +11,14 @@ import (
 	"strings"
 
 	gts "github.com/odvcencio/gotreesitter"
-	"github.com/odvcencio/gotreesitter/taproot"
+	walk "github.com/odvcencio/gotreesitter/taproot/walk"
 
-	"m31labs.dev/elio/grammar"
 	"m31labs.dev/elio/ir"
 )
 
-// Parse parses Elio source into an ir.Module using the grammargen-generated
-// tree-sitter grammar (grammar.ElioGrammar).
+// Parse parses Elio source into an ir.Module using the embedded grammar blob.
 func Parse(src string) (*ir.Module, error) {
-	root, tw, err := taproot.ParseFromBlob("elio", grammarBlob, grammar.ElioGrammar, []byte(src))
+	root, tw, err := walk.ParseFromBlob("elio", grammarBlob, []byte(src))
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func Parse(src string) (*ir.Module, error) {
 }
 
 type treeWalker struct {
-	*taproot.Walker
+	*walk.Walker
 }
 
 // span returns the 1-based source position where n begins.
