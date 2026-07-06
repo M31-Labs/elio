@@ -174,12 +174,37 @@ func (ev *evaluator) assign(target ir.Expr, v any) error {
 		if err != nil {
 			return err
 		}
-		m, ok := base.(map[string]any)
-		if !ok {
+		switch b := base.(type) {
+		case map[string]any:
+			b[t.Field] = v
+			return nil
+		case []float64:
+			// Component-wise write into a raw vector value (e.g. dst[i].x = ...),
+			// needed by kernels — like SkinDQS — that build vec4 results
+			// componentwise rather than assembling and assigning a whole vector at
+			// once. Only a single component may be targeted per assignment.
+			if len(t.Field) != 1 {
+				return fmt.Errorf("run: member-assign supports a single component, got .%s", t.Field)
+			}
+			ci := -1
+			switch t.Field[0] {
+			case 'x', 'r':
+				ci = 0
+			case 'y', 'g':
+				ci = 1
+			case 'z', 'b':
+				ci = 2
+			case 'w', 'a':
+				ci = 3
+			}
+			if ci < 0 || ci >= len(b) {
+				return fmt.Errorf("run: bad member-assign .%s", t.Field)
+			}
+			b[ci] = toFloat(v)
+			return nil
+		default:
 			return fmt.Errorf("run: cannot assign to .%s of %T", t.Field, base)
 		}
-		m[t.Field] = v
-		return nil
 	}
 	return fmt.Errorf("run: unsupported assign target %T", target)
 }
