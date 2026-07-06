@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/odvcencio/gotreesitter v0.20.4
 	m31labs.dev/gosx v0.25.10
-	m31labs.dev/prism v0.1.2
+	m31labs.dev/prism v0.1.3
 )
 
 require (
@@ -19,5 +19,7 @@ require (
 
 require (
 	m31labs.dev/eos v0.1.4
-	m31labs.dev/selena v0.1.1
+	m31labs.dev/selena v0.3.2
 )
+
+replace m31labs.dev/gosx => ../gosx // feat/browser-gpu-cull: ComputeExecutor registry
