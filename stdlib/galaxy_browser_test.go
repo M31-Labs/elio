@@ -19,6 +19,10 @@ func TestGalaxyParticleSimulateIsValid(t *testing.T) {
 // simulateParticle runs a single particle through GalaxyParticleSimulate's
 // CPU interpreter and returns the updated particle map and renderData map.
 func simulateParticle(t *testing.T, posX, posY, posZ, velX, velY, velZ, age, lifetime float64, forces []any, dt, totalTime float64) (map[string]any, map[string]any) {
+	return simulateParticleWithParams(t, posX, posY, posZ, velX, velY, velZ, age, lifetime, forces, dt, totalTime, nil)
+}
+
+func simulateParticleWithParams(t *testing.T, posX, posY, posZ, velX, velY, velZ, age, lifetime float64, forces []any, dt, totalTime float64, overrides map[string]any) (map[string]any, map[string]any) {
 	t.Helper()
 	p := map[string]any{
 		"posX": posX, "posY": posY, "posZ": posZ,
@@ -33,18 +37,21 @@ func simulateParticle(t *testing.T, posX, posY, posZ, velX, velY, velZ, age, lif
 		"deltaTime": dt, "totalTime": totalTime,
 		"count": int64(1), "_pad0": int64(0),
 		"emitterKind": int64(0),
-		"emitterX": 0.0, "emitterY": 0.0, "emitterZ": 0.0,
+		"emitterX":    0.0, "emitterY": 0.0, "emitterZ": 0.0,
 		"emitterRadius": 1.0, "emitterRate": 0.0,
 		"emitterLifetime": 5.0, "emitterOnce": int64(0),
 		"emitterArms": int64(2),
 		"emitterWind": 0.0, "emitterScatter": 0.0,
 		"emitterRotX": 0.0, "emitterRotY": 0.0, "emitterRotZ": 0.0,
-		"_pad2": int64(0),
+		"_pad2":     int64(0),
 		"sizeStart": 1.0, "sizeEnd": 0.5,
 		"colorStartR": 1.0, "colorStartG": 1.0, "colorStartB": 1.0,
 		"colorEndR": 0.5, "colorEndG": 0.5, "colorEndB": 0.5,
 		"opacityStart": 1.0, "opacityEnd": 0.0,
 		"forceCount": int64(len(forces)), "bounds": 0.0,
+	}
+	for k, v := range overrides {
+		params[k] = v
 	}
 	mem := &run.Memory{Vars: map[string]any{
 		"particles":  []any{p},
@@ -58,6 +65,53 @@ func simulateParticle(t *testing.T, posX, posY, posZ, velX, velY, velZ, age, lif
 	pOut := mem.Vars["particles"].([]any)[0].(map[string]any)
 	rdOut := mem.Vars["renderData"].([]any)[0].(map[string]any)
 	return pOut, rdOut
+}
+
+func simulateParticleSetWithParams(t *testing.T, count int, age, lifetime, dt, totalTime float64, overrides map[string]any) ([]any, []any) {
+	t.Helper()
+	particles := make([]any, count)
+	renderData := make([]any, count)
+	for i := 0; i < count; i++ {
+		particles[i] = map[string]any{
+			"posX": 0.0, "posY": 0.0, "posZ": 0.0,
+			"velX": 0.0, "velY": 0.0, "velZ": 0.0,
+			"age": age, "lifetime": lifetime,
+		}
+		renderData[i] = map[string]any{
+			"posX": 0.0, "posY": 0.0, "posZ": 0.0,
+			"size": 0.0, "r": 0.0, "g": 0.0, "b": 0.0, "a": 0.0,
+		}
+	}
+	params := map[string]any{
+		"deltaTime": dt, "totalTime": totalTime,
+		"count": int64(count), "_pad0": int64(0),
+		"emitterKind": int64(0),
+		"emitterX":    0.0, "emitterY": 0.0, "emitterZ": 0.0,
+		"emitterRadius": 1.0, "emitterRate": 0.0,
+		"emitterLifetime": 5.0, "emitterOnce": int64(0),
+		"emitterArms": int64(2),
+		"emitterWind": 0.0, "emitterScatter": 0.0,
+		"emitterRotX": 0.0, "emitterRotY": 0.0, "emitterRotZ": 0.0,
+		"_pad2":     int64(0),
+		"sizeStart": 1.0, "sizeEnd": 0.5,
+		"colorStartR": 1.0, "colorStartG": 1.0, "colorStartB": 1.0,
+		"colorEndR": 0.5, "colorEndG": 0.5, "colorEndB": 0.5,
+		"opacityStart": 1.0, "opacityEnd": 0.0,
+		"forceCount": int64(0), "bounds": 0.0,
+	}
+	for k, v := range overrides {
+		params[k] = v
+	}
+	mem := &run.Memory{Vars: map[string]any{
+		"particles":  particles,
+		"renderData": renderData,
+		"params":     params,
+		"forces":     []any{},
+	}}
+	if err := run.Run(GalaxyParticleSimulate(), "simulate", count, mem); err != nil {
+		t.Fatalf("run.Run simulate set: %v", err)
+	}
+	return mem.Vars["particles"].([]any), mem.Vars["renderData"].([]any)
 }
 
 // simulateForce builds a Force map for the simulate kernel.
@@ -106,6 +160,148 @@ func TestSimulateOrbitIntegration(t *testing.T) {
 	if math.Abs(p["velX"].(float64)) > 1e-5 || math.Abs(p["velY"].(float64)) > 1e-5 {
 		t.Errorf("orbit should be purely tangential: velX=%v velY=%v", p["velX"], p["velY"])
 	}
+}
+
+func TestSimulateFourArmSpiralSteersAlongLemniscate(t *testing.T) {
+	params := map[string]any{
+		"count":           int64(320),
+		"emitterKind":     int64(3),
+		"emitterArms":     int64(4),
+		"emitterRadius":   72.0,
+		"emitterWind":     math.Pi * 2.55,
+		"emitterScatter":  0.0,
+		"emitterLifetime": 10.0,
+	}
+
+	early, _ := simulateParticleWithParams(t, 0, 0, 0, 0, 0, 0, 0.1, 10, nil, 0.5, 0.0, params)
+	mid, _ := simulateParticleWithParams(t, 0, 0, 0, 0, 0, 0, 0.1, 10, nil, 0.5, 1.87, params)
+	later, _ := simulateParticleWithParams(t, 0, 0, 0, 0, 0, 0, 0.1, 10, nil, 0.5, 7.5, params)
+
+	if got := early["posX"].(float64); got <= 1.0 {
+		t.Fatalf("four-arm lemniscate early posX = %v, want movement toward positive lobe", got)
+	}
+	if got := later["posX"].(float64); got >= -1.0 {
+		t.Fatalf("four-arm lemniscate later posX = %v, want traversal toward opposite lobe", got)
+	}
+	if got := mid["posY"].(float64); math.Abs(got) < 3.0 {
+		t.Fatalf("four-arm lemniscate mid posY = %v, want screen-plane loop excursion", got)
+	}
+	if got := mid["posZ"].(float64); math.Abs(got) > 1.6 {
+		t.Fatalf("four-arm lemniscate mid posZ = %v, want only shallow depth wobble", got)
+	}
+}
+
+func TestSimulateFourArmSpiralWindControlsLemniscateTraversalSpeed(t *testing.T) {
+	base := map[string]any{
+		"count":           int64(320),
+		"emitterKind":     int64(3),
+		"emitterArms":     int64(4),
+		"emitterRadius":   72.0,
+		"emitterScatter":  0.0,
+		"emitterLifetime": 10.0,
+	}
+	slowParams := map[string]any{}
+	fastParams := map[string]any{}
+	for k, v := range base {
+		slowParams[k] = v
+		fastParams[k] = v
+	}
+	slowParams["emitterWind"] = math.Pi * 1.0
+	fastParams["emitterWind"] = math.Pi * 5.2
+
+	slow, _ := simulateParticleWithParams(t, 0, 0, 0, 0, 0, 0, 0.1, 10, nil, 0.5, 4.0, slowParams)
+	fast, _ := simulateParticleWithParams(t, 0, 0, 0, 0, 0, 0, 0.1, 10, nil, 0.5, 4.0, fastParams)
+
+	slowX := slow["posX"].(float64)
+	fastX := fast["posX"].(float64)
+	slowY := slow["posY"].(float64)
+	fastY := fast["posY"].(float64)
+	if math.Hypot(fastX-slowX, fastY-slowY) < 2.0 {
+		t.Fatalf("fast wind pos = %.3f,%.3f slow wind pos = %.3f,%.3f, want visibly different X/Y lemniscate phase", fastX, fastY, slowX, slowY)
+	}
+}
+
+func TestSimulateFourArmSpiralProducesContinuousLemniscateCoverage(t *testing.T) {
+	const count = 1400
+	_, renderData := simulateParticleSetWithParams(t, count, 4.0, 12.0, 0.016, 8.0, map[string]any{
+		"emitterKind":     int64(3),
+		"emitterArms":     int64(4),
+		"emitterRadius":   67.0,
+		"emitterWind":     math.Pi * 5.8,
+		"emitterScatter":  0.004,
+		"emitterLifetime": 12.0,
+		"sizeStart":       1.85,
+		"sizeEnd":         0.16,
+		"opacityStart":    1.0,
+		"opacityEnd":      0.0,
+	})
+
+	left, right, waist, upper, lower, visible := 0, 0, 0, 0, 0, 0
+	maxZ := 0.0
+	maxGap := 0.0
+	prevX, prevY := 0.0, 0.0
+	for i, raw := range renderData {
+		rd := raw.(map[string]any)
+		x := rd["posX"].(float64)
+		y := rd["posY"].(float64)
+		z := rd["posZ"].(float64)
+		a := rd["a"].(float64)
+		if a > 0.20 {
+			visible++
+		}
+		if x < -50 && math.Abs(y) < 34 {
+			left++
+		}
+		if x > 50 && math.Abs(y) < 34 {
+			right++
+		}
+		if math.Abs(x) < 7 && math.Abs(y) < 8 {
+			waist++
+		}
+		if y > 23 {
+			upper++
+		}
+		if y < -23 {
+			lower++
+		}
+		maxZ = math.Max(maxZ, math.Abs(z))
+		if i > 0 {
+			maxGap = math.Max(maxGap, math.Hypot(x-prevX, y-prevY))
+		}
+		prevX, prevY = x, y
+	}
+	first := renderData[0].(map[string]any)
+	maxGap = math.Max(maxGap, math.Hypot(first["posX"].(float64)-prevX, first["posY"].(float64)-prevY))
+
+	if visible < count*98/100 {
+		t.Fatalf("visible lemniscate samples = %d/%d, want nearly all authored particles visible", visible, count)
+	}
+	if left < 150 || right < 150 || waist < 40 || upper < 150 || lower < 150 {
+		t.Fatalf("coverage left=%d right=%d waist=%d upper=%d lower=%d, want continuous figure-eight coverage", left, right, waist, upper, lower)
+	}
+	if maxGap > 2.2 {
+		t.Fatalf("max adjacent screen-plane gap = %.3f, want continuous path samples", maxGap)
+	}
+	if maxZ > 1.8 {
+		t.Fatalf("max abs z = %.3f, want flat screen-plane lemniscate", maxZ)
+	}
+}
+
+func TestSimulateTwoArmSpiralDoesNotUseLemniscateSteering(t *testing.T) {
+	p, _ := simulateParticleWithParams(t, 0, 0, 0, 0, 0, 0, 0.1, 10, nil, 0.5, 7.5, map[string]any{
+		"count":          int64(320),
+		"emitterKind":    int64(3),
+		"emitterArms":    int64(2),
+		"emitterRadius":  72.0,
+		"emitterScatter": 0.0,
+	})
+
+	nearVec(t, "two-arm spiral position", []float64{
+		p["posX"].(float64), p["posY"].(float64), p["posZ"].(float64),
+	}, galaxyVec(0, 0, 0))
+	nearVec(t, "two-arm spiral velocity", []float64{
+		p["velX"].(float64), p["velY"].(float64), p["velZ"].(float64),
+	}, galaxyVec(0, 0, 0))
 }
 
 // TestSimulateRenderVertexBaking checks that the RenderVertex is populated
@@ -190,7 +386,7 @@ func TestCrossKernelIntegrationParity(t *testing.T) {
 	time := 5.0
 
 	testCases := []struct {
-		name    string
+		name             string
 		posX, posY, posZ float64
 		velX, velY, velZ float64
 		// native force (kind in native numbering), browser force (kind in browser numbering)
@@ -201,15 +397,15 @@ func TestCrossKernelIntegrationParity(t *testing.T) {
 			name: "gravity",
 			posX: 10, posY: 5, posZ: -3,
 			velX: 1, velY: -0.5, velZ: 0.2,
-			nativeForce:  galaxyForce(1, 9.8, 0, 0, -1, 0),   // native gravity kind=1
-			browserForce: browserForce(0, 9.8, 0, -1, 0, 0),   // browser gravity kind=0
+			nativeForce:  galaxyForce(1, 9.8, 0, 0, -1, 0),  // native gravity kind=1
+			browserForce: browserForce(0, 9.8, 0, -1, 0, 0), // browser gravity kind=0
 		},
 		{
 			name: "drag",
 			posX: 5, posY: 0, posZ: 2,
 			velX: 3, velY: -1, velZ: 0.5,
-			nativeForce:  galaxyForce(2, 0.3, 0, 0, 0, 0),   // native drag kind=2
-			browserForce: browserForce(4, 0.3, 0, 0, 0, 0),  // browser drag kind=4
+			nativeForce:  galaxyForce(2, 0.3, 0, 0, 0, 0),  // native drag kind=2
+			browserForce: browserForce(4, 0.3, 0, 0, 0, 0), // browser drag kind=4
 		},
 		{
 			name: "orbit",
@@ -222,8 +418,8 @@ func TestCrossKernelIntegrationParity(t *testing.T) {
 			// browser orbit kind=3; dx=8, dz=0, dist=8:
 			//   dv = (-dz/dist, 0, dx/dist) * str * dt = (0, 0, 1) * 1 * dt
 			// Both produce dv=(0,0,1)*dt — parity holds.
-			nativeForce:  galaxyForce(5, 1, 0, 0, 1, 0),   // native vortex, fv=(0,1,0): kind=5, str=1, freq=0, vx=0, vy=1, vz=0
-			browserForce: browserForce(3, 1, 0, 0, 0, 0),  // browser orbit kind=3
+			nativeForce:  galaxyForce(5, 1, 0, 0, 1, 0),  // native vortex, fv=(0,1,0): kind=5, str=1, freq=0, vx=0, vy=1, vz=0
+			browserForce: browserForce(3, 1, 0, 0, 0, 0), // browser orbit kind=3
 		},
 	}
 
@@ -231,7 +427,7 @@ func TestCrossKernelIntegrationParity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Native kernel run.
 			nativeP := galaxyParticle(
-				galaxyVec(tc.posX, tc.posY, tc.posZ, 0),  // pos vec4 (xyz + age=0)
+				galaxyVec(tc.posX, tc.posY, tc.posZ, 0),   // pos vec4 (xyz + age=0)
 				galaxyVec(tc.velX, tc.velY, tc.velZ, 100), // vel vec4 (xyz + lifetime=100)
 			)
 			nativeU := galaxyUniforms(dt, time, 100,

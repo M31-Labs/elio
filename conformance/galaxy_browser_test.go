@@ -47,6 +47,20 @@ func TestGalaxyParticleSimulateAllBackends(t *testing.T) {
 			t.Errorf("WGSL missing %q", want)
 		}
 	}
+	compactWGSL := strings.NewReplacer(" ", "", "\n", "", "\t", "", "\r", "").Replace(wsrc)
+	for _, want := range []string{
+		"emitterKind==3u",
+		"emitterArms==4u",
+		"emitterWind",
+		"lem_phase_speed",
+		"lem_phase",
+		"lem_c2",
+		"cos",
+	} {
+		if !strings.Contains(compactWGSL, want) {
+			t.Errorf("WGSL missing lemniscate marker %q", want)
+		}
+	}
 	prismvalidate.Shader(t, "naga", wsrc, ".wgsl", func(f string) []string { return []string{f} })
 
 	// GLSL — glslangValidator.
@@ -98,13 +112,13 @@ func TestGalaxyParticleSimulateAllBackends(t *testing.T) {
 		"deltaTime": 0.1, "totalTime": 1.0,
 		"count": int64(1), "_pad0": int64(0),
 		"emitterKind": int64(0),
-		"emitterX": 0.0, "emitterY": 0.0, "emitterZ": 0.0,
+		"emitterX":    0.0, "emitterY": 0.0, "emitterZ": 0.0,
 		"emitterRadius": 1.0, "emitterRate": 0.0,
 		"emitterLifetime": 5.0, "emitterOnce": int64(0),
 		"emitterArms": int64(2),
 		"emitterWind": 0.0, "emitterScatter": 0.0,
 		"emitterRotX": 0.0, "emitterRotY": 0.0, "emitterRotZ": 0.0,
-		"_pad2": int64(0),
+		"_pad2":     int64(0),
 		"sizeStart": 1.0, "sizeEnd": 0.5,
 		"colorStartR": 1.0, "colorStartG": 0.5, "colorStartB": 0.0,
 		"colorEndR": 0.0, "colorEndG": 0.5, "colorEndB": 1.0,
@@ -234,11 +248,12 @@ func fieldOffsets(fields []ir.Field, structs map[string][]ir.Field) map[string]i
 // (render/bundle/particles.go:630-657).
 //
 // GoSX encoding:
-//   [0..3]   dt, time, lifetime, forceCount  (4×f32 at 0..15)
-//   [16..31] emitterPos  vec4<f32>
-//   [32..47] initialSpeed vec4<f32>
-//   [48..]   forces[8] × ForceStride(32) = [cfg vec4][vector vec4]
-//   total    304 bytes
+//
+//	[0..3]   dt, time, lifetime, forceCount  (4×f32 at 0..15)
+//	[16..31] emitterPos  vec4<f32>
+//	[32..47] initialSpeed vec4<f32>
+//	[48..]   forces[8] × ForceStride(32) = [cfg vec4][vector vec4]
+//	total    304 bytes
 func TestParticleUniformsByteLayout(t *testing.T) {
 	mod := stdlib.GalaxyParticleUpdate()
 	structs := make(map[string][]ir.Field)
@@ -466,13 +481,13 @@ func TestGalaxySimulateIntegrationParity(t *testing.T) {
 		"deltaTime": dt, "totalTime": 0.0,
 		"count": int64(1), "_pad0": int64(0),
 		"emitterKind": int64(0),
-		"emitterX": 0.0, "emitterY": 0.0, "emitterZ": 0.0,
+		"emitterX":    0.0, "emitterY": 0.0, "emitterZ": 0.0,
 		"emitterRadius": 1.0, "emitterRate": 0.0,
 		"emitterLifetime": 5.0, "emitterOnce": int64(0),
 		"emitterArms": int64(2),
 		"emitterWind": 0.0, "emitterScatter": 0.0,
 		"emitterRotX": 0.0, "emitterRotY": 0.0, "emitterRotZ": 0.0,
-		"_pad2": int64(0),
+		"_pad2":     int64(0),
 		"sizeStart": 1.0, "sizeEnd": 1.0,
 		"colorStartR": 1.0, "colorStartG": 1.0, "colorStartB": 1.0,
 		"colorEndR": 1.0, "colorEndG": 1.0, "colorEndB": 1.0,
@@ -531,13 +546,13 @@ func TestGalaxySimulateEmitterKindDefault(t *testing.T) {
 		"deltaTime": 0.016, "totalTime": 0.0,
 		"count": int64(1), "_pad0": int64(0),
 		"emitterKind": int64(99), // out-of-range: reference default => point
-		"emitterX": 0.0, "emitterY": 0.0, "emitterZ": 0.0,
+		"emitterX":    0.0, "emitterY": 0.0, "emitterZ": 0.0,
 		"emitterRadius": 1.0, "emitterRate": 0.0,
 		"emitterLifetime": 5.0, "emitterOnce": int64(0),
 		"emitterArms": int64(2),
 		"emitterWind": 0.0, "emitterScatter": 0.0,
 		"emitterRotX": 0.0, "emitterRotY": 0.0, "emitterRotZ": 0.0,
-		"_pad2": int64(0),
+		"_pad2":     int64(0),
 		"sizeStart": 1.0, "sizeEnd": 1.0,
 		"colorStartR": 1.0, "colorStartG": 1.0, "colorStartB": 1.0,
 		"colorEndR": 1.0, "colorEndG": 1.0, "colorEndB": 1.0,
