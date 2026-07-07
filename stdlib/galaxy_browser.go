@@ -299,6 +299,54 @@ func GalaxyParticleSimulate() *ir.Module {
 		return s
 	}
 
+	// emitLemniscate: screen-plane Gerono figure-eight used by the m31 browser
+	// starpath discriminator (spiral emitter with exactly four arms).
+	emitLemniscateInto := func(indexExpr ir.Expr, prefix string) []ir.Stmt {
+		h90s, h90 := inlineHash2(indexExpr, lit("90u"))
+		h91s, h91 := inlineHash2(indexExpr, lit("91u"))
+		h92s, h92 := inlineHash2(indexExpr, lit("92u"))
+		h93s, h93 := inlineHash2(indexExpr, lit("93u"))
+		ltStmts, ltExpr := inlineParticleLifetime(indexExpr, prefix+"el_")
+
+		s := []ir.Stmt{
+			letS(prefix+"el_count", call("max", params("count"), lit("1u"))),
+			letS(prefix+"el_frac", bin("/", call("f32", indexExpr), call("f32", name(prefix+"el_count")))),
+			letS(prefix+"el_radius", call("max", params("emitterRadius"), lit("0.001"))),
+			letS(prefix+"el_phase", bin("*", name(prefix+"el_frac"), lit("6.2831853"))),
+			letS(prefix+"el_s", call("sin", name(prefix+"el_phase"))),
+			letS(prefix+"el_c", call("cos", name(prefix+"el_phase"))),
+			letS(prefix+"el_c2", call("cos", bin("*", name(prefix+"el_phase"), lit("2.0")))),
+		}
+		s = append(s, h90s...)
+		s = append(s, h91s...)
+		s = append(s, h92s...)
+		s = append(s, h93s...)
+		s = append(s,
+			letS(prefix+"el_scatter", bin("*", params("emitterScatter"), name(prefix+"el_radius"))),
+			set(pf("posX"), bin("+",
+				bin("*", name(prefix+"el_c"), name(prefix+"el_radius")),
+				bin("*", bin("-", h92, lit("0.5")), name(prefix+"el_scatter")))),
+			set(pf("posY"), bin("+",
+				bin("*", bin("*", name(prefix+"el_s"), name(prefix+"el_c")), bin("*", name(prefix+"el_radius"), lit("0.82"))),
+				bin("*", bin("-", h90, lit("0.5")), name(prefix+"el_scatter")))),
+			set(pf("posZ"), bin("+",
+				bin("*", bin("-", h93, lit("0.5")), bin("*", name(prefix+"el_radius"), lit("0.025"))),
+				bin("*",
+					call("sin", bin("+", bin("*", name(prefix+"el_phase"), lit("2.0")), bin("*", h91, lit("6.2831853")))),
+					bin("*", name(prefix+"el_radius"), lit("0.010"))))),
+			letS(prefix+"el_speed", bin("*", name(prefix+"el_radius"), lit("0.42"))),
+			set(pf("velX"), bin("*", bin("*", lit("-1.0"), name(prefix+"el_s")), name(prefix+"el_speed"))),
+			set(pf("velY"), bin("*", bin("*", name(prefix+"el_c2"), name(prefix+"el_speed")), lit("0.82"))),
+			set(pf("velZ"), bin("*",
+				call("cos", bin("+", bin("*", name(prefix+"el_phase"), lit("2.0")), bin("*", h91, lit("6.2831853")))),
+				bin("*", name(prefix+"el_radius"), lit("0.008")))),
+			set(pf("age"), lit("0.0")),
+		)
+		s = append(s, ltStmts...)
+		s = append(s, set(pf("lifetime"), ltExpr))
+		return s
+	}
+
 	// emitSpiral: galaxy-arm spiral in XZ plane with optional rotation
 	emitSpiralInto := func(indexExpr ir.Expr, prefix string) []ir.Stmt {
 		h30s, h30 := inlineHash2(indexExpr, lit("30u"))
@@ -355,7 +403,11 @@ func GalaxyParticleSimulate() *ir.Module {
 					Then: emitDiscInto(indexExpr, prefix+"k2_"),
 					Else: []ir.Stmt{ir.If{
 						Cond: bin("==", params("emitterKind"), lit("3u")),
-						Then: emitSpiralInto(indexExpr, prefix+"k3_"),
+						Then: []ir.Stmt{ir.If{
+							Cond: bin("==", params("emitterArms"), lit("4u")),
+							Then: emitLemniscateInto(indexExpr, prefix+"k3l_"),
+							Else: emitSpiralInto(indexExpr, prefix+"k3_"),
+						}},
 						Else: emitPointInto(indexExpr, prefix+"k0_"),
 					}},
 				}},
@@ -412,6 +464,58 @@ func GalaxyParticleSimulate() *ir.Module {
 		name("forces"),
 	)
 
+	lemniscateSteer := func() []ir.Stmt {
+		h90s, h90 := inlineHash2(simI, lit("90u"))
+		h91s, h91 := inlineHash2(simI, lit("91u"))
+		h92s, h92 := inlineHash2(simI, lit("92u"))
+		h93s, h93 := inlineHash2(simI, lit("93u"))
+		s := []ir.Stmt{
+			letS("lem_count", call("max", params("count"), lit("1u"))),
+			letS("lem_frac", bin("/", call("f32", simI), call("f32", name("lem_count")))),
+			letS("lem_phase_speed", call("max", lit("0.24"), bin("*", call("abs", params("emitterWind")), lit("0.055")))),
+			letS("lem_phase", bin("+", bin("*", name("lem_frac"), lit("6.2831853")), bin("*", params("totalTime"), name("lem_phase_speed")))),
+			letS("lem_radius", call("max", params("emitterRadius"), lit("0.001"))),
+			letS("lem_s", call("sin", name("lem_phase"))),
+			letS("lem_c", call("cos", name("lem_phase"))),
+			letS("lem_c2", call("cos", bin("*", name("lem_phase"), lit("2.0")))),
+		}
+		s = append(s, h90s...)
+		s = append(s, h91s...)
+		s = append(s, h92s...)
+		s = append(s, h93s...)
+		s = append(s,
+			letS("lem_scatter", bin("*", params("emitterScatter"), name("lem_radius"))),
+			letS("lem_targetX", bin("+",
+				bin("*", name("lem_c"), name("lem_radius")),
+				bin("*", bin("-", h92, lit("0.5")), name("lem_scatter")))),
+			letS("lem_targetY", bin("+",
+				bin("*", bin("*", name("lem_s"), name("lem_c")), bin("*", name("lem_radius"), lit("0.82"))),
+				bin("*", bin("-", h90, lit("0.5")), name("lem_scatter")))),
+			letS("lem_targetZ", bin("+",
+				bin("*", bin("-", h93, lit("0.5")), bin("*", name("lem_radius"), lit("0.025"))),
+				bin("*",
+					call("sin", bin("+", bin("*", name("lem_phase"), lit("2.0")), bin("*", h91, lit("6.2831853")))),
+					bin("*", name("lem_radius"), lit("0.010"))))),
+			letS("lem_speed", bin("*", name("lem_radius"), lit("0.42"))),
+			letS("lem_pull", call("clamp", bin("*", params("deltaTime"), lit("3.2")), lit("0.0"), lit("0.18"))),
+			letS("lem_tanX", bin("*", bin("*", lit("-1.0"), name("lem_s")), name("lem_speed"))),
+			letS("lem_tanY", bin("*", bin("*", name("lem_c2"), name("lem_speed")), lit("0.82"))),
+			letS("lem_tanZ", bin("*",
+				call("cos", bin("+", bin("*", name("lem_phase"), lit("2.0")), bin("*", h91, lit("6.2831853")))),
+				bin("*", name("lem_radius"), lit("0.008")))),
+			letS("lem_goalVX", bin("+", name("lem_tanX"), bin("*", bin("-", name("lem_targetX"), pf("posX")), lit("1.35")))),
+			letS("lem_goalVY", bin("+", name("lem_tanY"), bin("*", bin("-", name("lem_targetY"), pf("posY")), lit("1.35")))),
+			letS("lem_goalVZ", bin("+", name("lem_tanZ"), bin("*", bin("-", name("lem_targetZ"), pf("posZ")), lit("1.35")))),
+			set(pf("posX"), name("lem_targetX")),
+			set(pf("posY"), name("lem_targetY")),
+			set(pf("posZ"), name("lem_targetZ")),
+			set(pf("velX"), call("mix", pf("velX"), name("lem_goalVX"), name("lem_pull"))),
+			set(pf("velY"), call("mix", pf("velY"), name("lem_goalVY"), name("lem_pull"))),
+			set(pf("velZ"), call("mix", pf("velZ"), name("lem_goalVZ"), name("lem_pull"))),
+		)
+		return s
+	}
+
 	// Aging state machine block when p.age < 0:
 	ageNegBlock := []ir.Stmt{
 		ir.If{
@@ -465,8 +569,8 @@ func GalaxyParticleSimulate() *ir.Module {
 	// t = clamp(select(p.age / p.lifetime, 0.0, p.lifetime <= 0.0), 0.0, 1.0)
 	tExpr := call("clamp",
 		call("select",
-			bin("/", pf("age"), pf("lifetime")), // falseVal: age/lifetime
-			lit("0.0"),                           // trueVal: 0 (when cond is true)
+			bin("/", pf("age"), pf("lifetime")),    // falseVal: age/lifetime
+			lit("0.0"),                             // trueVal: 0 (when cond is true)
 			bin("<=", pf("lifetime"), lit("0.0"))), // cond: lifetime <= 0
 		lit("0.0"), lit("1.0"))
 
@@ -513,6 +617,10 @@ func GalaxyParticleSimulate() *ir.Module {
 		},
 	}
 	body = append(body, forceLoop...)
+	body = append(body, ir.If{
+		Cond: bin("&&", bin("==", params("emitterKind"), lit("3u")), bin("==", params("emitterArms"), lit("4u"))),
+		Then: lemniscateSteer(),
+	})
 	body = append(body,
 		ir.Assign{Target: pf("posX"), Op: "+", Value: bin("*", pf("velX"), params("deltaTime"))},
 		ir.Assign{Target: pf("posY"), Op: "+", Value: bin("*", pf("velY"), params("deltaTime"))},
