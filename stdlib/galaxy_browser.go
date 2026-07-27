@@ -2,6 +2,8 @@ package stdlib
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"m31labs.dev/elio/ir"
 )
@@ -97,10 +99,40 @@ func GalaxyParticleSimulate() *ir.Module {
 	}
 
 	// hash2(a u32, b u32) -> f32 = hash(a * 1597334677u + b * 3812015801u)
+	//
+	// WGSL requires const-expressions (both operands literal) to evaluate
+	// without overflow at compile time; a runtime multiply is allowed to wrap.
+	// b is always a small u32 literal at every call site in this file, so
+	// `b * 3812015801u` is a const-expression and several of its results
+	// (b >= 2) overflow u32 — Firefox's naga rejects the shader with
+	// "multiplication operation overflowed" even though the CLI naga and
+	// Chrome's Tint both accept it silently. Fold the literal*literal product
+	// here in Go, with explicit u32 wrapping, so the emitted WGSL never
+	// contains an overflowing const-expression. The folded value is exactly
+	// what the GPU computes at runtime, so this changes no rendered output.
+	//
+	// a is always a runtime variable (the particle index) at every call site,
+	// so `a * 1597334677u` stays a variable*literal runtime multiply, which
+	// legally wraps and must not be folded or altered.
+	mulU32Lit := func(litExpr ir.Expr, factor uint32) (ir.Expr, bool) {
+		l, ok := litExpr.(ir.Lit)
+		if !ok || !strings.HasSuffix(l.Text, "u") {
+			return nil, false
+		}
+		v, err := strconv.ParseUint(strings.TrimSuffix(l.Text, "u"), 0, 32)
+		if err != nil {
+			return nil, false
+		}
+		return lit(fmt.Sprintf("%du", uint32(v)*factor)), true
+	}
 	inlineHash2 := func(aExpr, bExpr ir.Expr) ([]ir.Stmt, ir.Expr) {
+		bTerm, folded := mulU32Lit(bExpr, 3812015801)
+		if !folded {
+			bTerm = bin("*", bExpr, lit("3812015801u"))
+		}
 		seed := bin("+",
 			bin("*", aExpr, lit("1597334677u")),
-			bin("*", bExpr, lit("3812015801u")))
+			bTerm)
 		return inlineHash(seed)
 	}
 
