@@ -26,7 +26,7 @@ func Ocean() (ts.KernelSet, error) {
 		build       func() (*ir.Module, error)
 		gather      bool
 	}{
-		{"ocean_spectrum", "ocean_spectrum", stdlib.OceanSpectrum, false},
+		{"ocean_spectrum", "ocean_spectrum", stdlib.OceanSpectrum, true},
 		{"ocean_evolve", "ocean_evolve", stdlib.OceanEvolve, true},
 		{"ocean_assemble", "ocean_assemble", stdlib.OceanAssemble, true},
 		{"ocean_mip", "ocean_mip", stdlib.OceanMip, true},

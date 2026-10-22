@@ -38,7 +38,7 @@ func runEmitTS(args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch args[1] {
 	case "ocean":
-		set, err = kernelsets.Ocean()
+		set, err = kernelsets.OceanWithGraphs()
 	default:
 		fmt.Fprintf(stderr, "elio: unknown kernel set %q (want ocean)\n", args[1])
 		return 2
