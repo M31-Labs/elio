@@ -34,7 +34,7 @@ type Builder struct {
 func NewBuilder(name, backend, tier string, kernels []Kernel) *Builder {
 	return &Builder{
 		g: Graph{Name: name, Backend: backend, Tier: tier, Version: Version,
-			Params: []Param{}, Resources: []Resource{}, Passes: []Pass{}, FrameSwaps: [][2]string{}, Exports: map[string]string{}},
+			Params: []Param{}, Resources: []Resource{}, Passes: []Pass{}, FrameSwaps: [][2]string{}, Exports: map[string]string{}, ExportParams: []string{}},
 		kernels: kernels,
 	}
 }
@@ -151,6 +151,12 @@ func (b *Builder) Swap(a, c string) *Builder {
 // Export names a resource for the surface to bind.
 func (b *Builder) Export(name, resource string) *Builder {
 	b.g.Exports[name] = resource
+	return b
+}
+
+// ExportParams lists numeric params the surface binds as uniforms.
+func (b *Builder) ExportParams(names ...string) *Builder {
+	b.g.ExportParams = append(b.g.ExportParams, names...)
 	return b
 }
 

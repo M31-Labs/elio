@@ -39,7 +39,7 @@ func numericType(t string) bool { return t == F32 || t == U32 || t == I32 }
 //     reference (uniform, when, resource feed, expression) names a declared
 //     param of a matching type; a param refers only to earlier params.
 //  6. Every export names a texture resource (on WebGPU, a buffer too, for
-//     readback).
+//     readback); every exportParams entry names a numeric param.
 func Validate(g Graph, kernels []Kernel) error {
 	v := &validator{g: g, kernels: map[string]Kernel{}, params: map[string]Param{}, res: map[string]Resource{}}
 	for _, k := range kernels {
@@ -97,6 +97,11 @@ func (v *validator) run() {
 		}
 		if !sameShape(a, b) {
 			v.errf("swap %v: the two resources differ in kind, type or size", s)
+		}
+	}
+	for _, n := range g.ExportParams {
+		if p, ok := v.params[n]; !ok || !numericType(p.Type) {
+			v.errf("exportParams: %q is not a declared numeric param", n)
 		}
 	}
 	for name, r := range g.Exports {

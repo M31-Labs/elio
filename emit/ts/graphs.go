@@ -25,6 +25,7 @@ export interface ElioGraph {
   passes: Record<string, unknown>[];
   frameSwaps: [string, string][];
   exports: Record<string, string>;
+  exportParams?: string[];
 }
 `
 

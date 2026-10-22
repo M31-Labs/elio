@@ -53,6 +53,9 @@ type Graph struct {
 	Passes     []Pass            `json:"passes"`
 	FrameSwaps [][2]string       `json:"frameSwaps"`
 	Exports    map[string]string `json:"exports"`
+	// ExportParams lists numeric params the surface binds as uniforms (for
+	// example a water offset wrapped per cascade).
+	ExportParams []string `json:"exportParams,omitempty"`
 }
 
 // Param is a named per-frame input of the graph. Params are evaluated in
@@ -71,7 +74,7 @@ type Source struct {
 	Kind  string  `json:"kind"`
 	Value float64 `json:"value"`          // value
 	Name  string  `json:"name,omitempty"` // frame
-	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor (one)
+	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor (one); mod is floored (the result takes the divisor's sign); the runner evaluates in f64
 	Args  []any   `json:"args,omitempty"` // expr: "param:<name>" or a number
 	Of    string  `json:"of,omitempty"`   // accumulate, delta: "param:<name>"
 }

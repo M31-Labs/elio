@@ -123,6 +123,16 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 	b.Accumulate("simTime", "timeScale")
 	b.Expr("phaseTime", graph.F32, "mod", ref("simTime"), ref("loopPeriod"))
 	b.Accumulate("waterX", "driftX").Accumulate("waterZ", "driftZ")
+	// The surface samples cascade c at (xz - water) / size. The water offset
+	// grows without bound, so the runner wraps it to each cascade's tile in
+	// f64 and the surface binds the wrapped values.
+	for c := 0; c < cascades; c++ {
+		for _, ax := range []string{"X", "Z"} {
+			n := fmt.Sprintf("waterMod%s%d", ax, c)
+			b.Expr(n, graph.F32, "mod", ref("water"+ax), oceanCascades[c].size)
+			b.ExportParams(n)
+		}
+	}
 	for _, ax := range []string{"X", "Z"} {
 		b.Expr("foamRel"+ax, graph.F32, "sub", ref("camera"+ax), ref("water"+ax))
 		b.Expr("foamTexel"+ax, graph.F32, "div", ref("foamRel"+ax), foamCell)
