@@ -37,7 +37,7 @@ func runOceanAssemble(t *testing.T, n int, a, b []any, lambda float64, opts run.
 	disp = &run.Texture{Width: n, Height: n, Format: "rgba16float", Data: make([]float64, n*n*4)}
 	slope = &run.Texture{Width: n, Height: n, Format: "rgba16float", Data: make([]float64, n*n*4)}
 	mem := &run.Memory{Vars: map[string]any{
-		"assem":    map[string]any{"n": int64(n), "_pad0": int64(0), "_pad1": int64(0), "_pad2": int64(0), "lambda": lambda, "_pad3": 0.0, "_pad4": 0.0, "_pad5": 0.0},
+		"assem":  map[string]any{"n": int64(n), "_pad0": int64(0), "_pad1": int64(0), "_pad2": int64(0), "lambda": lambda, "_pad3": 0.0, "_pad4": 0.0, "_pad5": 0.0},
 		"fieldA": a, "fieldB": b, "disp": disp, "slope": slope,
 	}}
 	if err := run.RunWith(m, "ocean_assemble", n*n, mem, opts); err != nil {

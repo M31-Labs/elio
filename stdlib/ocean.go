@@ -69,6 +69,17 @@ func OceanAssemble() (*ir.Module, error) {
 	return parseOcean("ocean/assemble.elio", OceanAssembleSource, false)
 }
 
+// OceanMipSource is the .elio source of ocean_mip: a 2x2 box downsample of one
+// []vec4 level into an rgba16float texture level. It is gather-compatible.
+//
+//go:embed ocean/mip.elio
+var OceanMipSource string
+
+// OceanMip builds the ocean_mip module from OceanMipSource.
+func OceanMip() (*ir.Module, error) {
+	return parseOcean("ocean/mip.elio", OceanMipSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)
