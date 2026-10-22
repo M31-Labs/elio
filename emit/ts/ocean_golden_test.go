@@ -9,7 +9,7 @@ import (
 )
 
 func TestOceanGolden(t *testing.T) {
-	set, err := kernelsets.Ocean()
+	set, err := kernelsets.OceanWithGraphs()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestOceanGolden(t *testing.T) {
 }
 
 func TestOceanGlobalGolden(t *testing.T) {
-	set, err := kernelsets.Ocean()
+	set, err := kernelsets.OceanWithGraphs()
 	if err != nil {
 		t.Fatal(err)
 	}

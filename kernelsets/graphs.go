@@ -9,13 +9,25 @@ import (
 	"m31labs.dev/elio/graph"
 )
 
-// GraphKernels lists a kernel set's kernels for graph validation and building.
-func GraphKernels(set ts.KernelSet) []graph.Kernel {
-	var ks []graph.Kernel
-	for _, k := range set.Kernels {
-		ks = append(ks, graph.Kernel{Name: k.Name, Entry: k.Entry, Module: k.Module, Gather: k.Gather})
+// OceanWithGraphs is Ocean plus the six ocean graphs, in the order
+// webgpu/high, medium, low, then webgl2/high, medium, low. `elio emit ts --set
+// ocean` emits this set.
+func OceanWithGraphs() (ts.KernelSet, error) {
+	set, err := Ocean()
+	if err != nil {
+		return ts.KernelSet{}, err
 	}
-	return ks
+	gs, err := oceanGraphs(set)
+	if err != nil {
+		return ts.KernelSet{}, err
+	}
+	for _, backend := range []string{graph.WebGPU, graph.WebGL2} {
+		for _, tier := range oceanTiers {
+			key := backend + "/" + tier.name
+			set.Graphs = append(set.Graphs, ts.NamedGraph{Key: key, Graph: gs[key]})
+		}
+	}
+	return set, nil
 }
 
 // The ocean's fixed conventions (spec "Wave model").
@@ -64,7 +76,11 @@ func OceanGraphs() (map[string]graph.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	ks := GraphKernels(set)
+	return oceanGraphs(set)
+}
+
+func oceanGraphs(set ts.KernelSet) (map[string]graph.Graph, error) {
+	ks := set.GraphKernels()
 	out := map[string]graph.Graph{}
 	for _, backend := range []string{graph.WebGPU, graph.WebGL2} {
 		for _, tier := range oceanTiers {

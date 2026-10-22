@@ -9,7 +9,7 @@ import (
 
 var graphKeys = []string{"webgpu/high", "webgpu/medium", "webgpu/low", "webgl2/high", "webgl2/medium", "webgl2/low"}
 
-func oceanGraphs(t *testing.T) (map[string]graph.Graph, []graph.Kernel) {
+func loadGraphs(t *testing.T) (map[string]graph.Graph, []graph.Kernel) {
 	t.Helper()
 	gs, err := OceanGraphs()
 	if err != nil {
@@ -19,11 +19,11 @@ func oceanGraphs(t *testing.T) (map[string]graph.Graph, []graph.Kernel) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return gs, GraphKernels(set)
+	return gs, set.GraphKernels()
 }
 
 func TestOceanGraphsValidate(t *testing.T) {
-	gs, ks := oceanGraphs(t)
+	gs, ks := loadGraphs(t)
 	if len(gs) != len(graphKeys) {
 		t.Fatalf("%d graphs, want %d", len(gs), len(graphKeys))
 	}
@@ -47,7 +47,7 @@ func TestOceanGraphsValidate(t *testing.T) {
 // mipmap passes. Then foam (1 + mips: 10 on webgpu, 1 mipmap on webgl2) and,
 // on webgpu, one probe.
 func TestOceanGraphPassCounts(t *testing.T) {
-	gs, _ := oceanGraphs(t)
+	gs, _ := loadGraphs(t)
 	want := map[string]int{
 		"webgpu/high":   4 + 4 + 16 + 4 + (12 + 3*16) + 1 + 10 + 1,
 		"webgpu/medium": 4 + 4 + 16 + 4 + (12 + 3*14) + 1 + 10 + 1,
@@ -64,7 +64,7 @@ func TestOceanGraphPassCounts(t *testing.T) {
 }
 
 func TestOceanGraphExportsAndParams(t *testing.T) {
-	gs, _ := oceanGraphs(t)
+	gs, _ := loadGraphs(t)
 	for _, key := range graphKeys {
 		g := gs[key]
 		cascades := 4
@@ -107,7 +107,7 @@ func TestOceanGraphExportsAndParams(t *testing.T) {
 }
 
 func TestOceanGraphResolutions(t *testing.T) {
-	gs, _ := oceanGraphs(t)
+	gs, _ := loadGraphs(t)
 	size := func(g graph.Graph, name string) int {
 		for _, r := range g.Resources {
 			if r.Name == name {
@@ -121,5 +121,20 @@ func TestOceanGraphResolutions(t *testing.T) {
 		if size(g, "dispTex0") != 64 || size(g, "dispTex1") != n || size(g, "dispTex2") != n || size(g, "foamTex") != 1024 {
 			t.Errorf("%s: cascade sizes %d %d %d foam %d", key, size(g, "dispTex0"), size(g, "dispTex1"), size(g, "dispTex2"), size(g, "foamTex"))
 		}
+	}
+}
+
+func TestOceanWithGraphsOrder(t *testing.T) {
+	set, err := OceanWithGraphs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, ng := range set.Graphs {
+		if ng.Key != graphKeys[i] {
+			t.Errorf("graph %d is %s, want %s", i, ng.Key, graphKeys[i])
+		}
+	}
+	if len(set.Graphs) != len(graphKeys) {
+		t.Errorf("%d graphs", len(set.Graphs))
 	}
 }
