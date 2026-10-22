@@ -15,7 +15,7 @@ func (ev *evaluator) eval(e ir.Expr) (any, error) {
 		}
 		return v, nil
 	case ir.Lit:
-		return litValue(x.Text), nil
+		return ev.round(litValue(x.Text)), nil
 	case ir.Unary:
 		v, err := ev.eval(x.E)
 		if err != nil {
@@ -37,7 +37,11 @@ func (ev *evaluator) eval(e ir.Expr) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return binop(x.Op, l, r)
+		out, err := binop(x.Op, l, r)
+		if err != nil {
+			return nil, err
+		}
+		return ev.round(out), nil
 	case ir.Call:
 		return ev.call(x)
 	case ir.Index:
@@ -93,7 +97,7 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		for i := range va {
 			sum += va[i] * vb[i]
 		}
-		return sum, nil
+		return ev.round(sum), nil
 	case "atomicAdd":
 		ref, err := ev.eval(c.Args[0])
 		if err != nil {
@@ -151,7 +155,10 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		return falseVal, nil
 	}
 	if v, handled, err := ev.mathBuiltin(c); handled {
-		return v, err
+		if err != nil {
+			return nil, err
+		}
+		return ev.round(v), nil
 	}
 	if n, _, ok := ir.VecConstructor(c.Func); ok {
 		return ev.vecConstruct(n, c.Args)
@@ -166,7 +173,7 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		case "i32", "u32":
 			return int64(f), nil // truncate toward zero, matching GPU int conversion
 		}
-		return f, nil
+		return ev.round(f), nil
 	}
 	return nil, fmt.Errorf("run: unsupported call %q", c.Func)
 }

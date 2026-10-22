@@ -4,7 +4,9 @@
 //
 // Each storage buffer becomes a 2D texture of width `elio_width`: element i is
 // texel (i % elio_width, i / elio_width). A read buffer is a sampler2D read
-// with texelFetch. A written buffer is a color attachment (RGBA32F or RGBA16F).
+// with texelFetch. A written buffer, or a storage texture written as
+// textureStore(t, vec2u(i % W, i / W), v), is a color attachment (RGBA32F or
+// RGBA16F; at most 32 bytes per pixel across all outputs).
 // Invocation gid.x is the pixel's linear index, so every invocation writes its
 // own element, which is the gather form. sema.CheckGather defines which
 // kernels qualify. The Layout result tells the host how to bind them.
@@ -90,6 +92,10 @@ func (e *emitter) emit() (string, Layout, error) {
 				used[root] = true
 			}
 		}
+		if tex, _, ok := e.textureStore(s); ok {
+			written[tex] = true
+			used[tex] = true
+		}
 	}, func(x ir.Expr) {
 		if n, ok := x.(ir.Name); ok {
 			if _, isB := e.bindings[n.Name]; isB {
@@ -142,7 +148,11 @@ func (e *emitter) emit() (string, Layout, error) {
 			v := b.Name + "_out"
 			e.outVar[b.Name] = v
 			fmt.Fprintf(w, "layout(location = %d) out vec4 %s;\n", loc, v)
-			lay.Outputs = append(lay.Outputs, Output{Name: b.Name, Elem: elemKind(b), Location: loc, Variable: v})
+			o := Output{Name: b.Name, Elem: elemKind(b), Location: loc, Variable: v}
+			if tex, ok := b.Type.(ir.StorageTexture); ok {
+				o.Format = tex.Format
+			}
+			lay.Outputs = append(lay.Outputs, o)
 			loc++
 		default:
 			fmt.Fprintf(w, "uniform highp sampler2D %s_tex;\nuniform uint %s_len;\n", b.Name, b.Name)
@@ -179,6 +189,9 @@ func (e *emitter) emit() (string, Layout, error) {
 }
 
 func elemKind(b ir.Binding) string {
+	if _, ok := b.Type.(ir.StorageTexture); ok {
+		return "vec4"
+	}
 	if arr, ok := b.Type.(ir.Array); ok {
 		if v, ok := arr.Elem.(ir.Vec); ok {
 			return fmt.Sprintf("vec%d", v.N)
@@ -189,7 +202,36 @@ func elemKind(b ir.Binding) string {
 
 func (e *emitter) isStorage(name string) bool {
 	b, ok := e.bindings[name]
+	if ok {
+		if _, tex := b.Type.(ir.StorageTexture); tex {
+			return false
+		}
+	}
 	return ok && b.Space == ir.Storage
+}
+
+// textureStore matches `textureStore(tex, coord, value);` on a storage texture
+// binding. sema.CheckGather has already required the coordinate to be the
+// fragment's own pixel, so the emitter drops it.
+func (e *emitter) textureStore(s ir.Stmt) (tex string, value ir.Expr, ok bool) {
+	d, isDo := s.(ir.Do)
+	if !isDo {
+		return "", nil, false
+	}
+	c, isCall := d.Expr.(ir.Call)
+	if !isCall || c.Func != "textureStore" || len(c.Args) != 3 {
+		return "", nil, false
+	}
+	n, isName := c.Args[0].(ir.Name)
+	if !isName {
+		return "", nil, false
+	}
+	if b, found := e.bindings[n.Name]; !found {
+		return "", nil, false
+	} else if _, isTex := b.Type.(ir.StorageTexture); !isTex {
+		return "", nil, false
+	}
+	return n.Name, c.Args[2], true
 }
 
 func rootOf(x ir.Expr) string {
@@ -235,6 +277,10 @@ func (e *emitter) stmt(s ir.Stmt, depth int) {
 	case ir.Break:
 		fmt.Fprintf(w, "%sbreak;\n", pad)
 	case ir.Do:
+		if tex, val, ok := e.textureStore(x); ok {
+			fmt.Fprintf(w, "%s%s = %s;\n", pad, e.outVar[tex], e.expr(val))
+			break
+		}
 		fmt.Fprintf(w, "%s%s;\n", pad, e.expr(x.Expr))
 	case ir.If:
 		fmt.Fprintf(w, "%sif (%s) {\n", pad, e.expr(x.Cond))
@@ -333,6 +379,9 @@ func (e *emitter) expr(ex ir.Expr) string {
 	case ir.Member:
 		if n, ok := x.E.(ir.Name); ok && n.Name == e.gid && e.gid != "" {
 			return gidSwizzle(x.Field)
+		}
+		if c, ok := x.E.(ir.Call); ok && c.Func == "textureDimensions" && x.Field == "x" {
+			return "elio_width" // the render target is elio_width texels wide
 		}
 		return fmt.Sprintf("%s.%s", e.expr(x.E), safe(x.Field))
 	case ir.AddrOf:
@@ -461,6 +510,9 @@ func (e *emitter) infer(ex ir.Expr) ir.Type {
 		}
 		return ir.F32
 	case ir.Member:
+		if c, ok := x.E.(ir.Call); ok && c.Func == "textureDimensions" && x.Field == "x" {
+			return ir.U32
+		}
 		base := e.infer(x.E)
 		if n, ok := base.(ir.Named); ok {
 			for _, f := range e.structs[n.Name].Fields {

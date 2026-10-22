@@ -69,6 +69,41 @@ func gatherMix() *ir.Module {
 	}
 }
 
+// gatherTwoTextures reads one buffer and writes two RGBA16F storage textures.
+func gatherTwoTextures() *ir.Module {
+	n := func(s string) ir.Expr { return ir.Name{Name: s} }
+	coord := func(w ir.Expr) ir.Expr {
+		return ir.Call{Func: "vec2u", Args: []ir.Expr{ir.Binary{Op: "%", L: n("i"), R: w}, ir.Binary{Op: "/", L: n("i"), R: w}}}
+	}
+	store := func(tex string, w, v ir.Expr) ir.Stmt {
+		return ir.Do{Expr: ir.Call{Func: "textureStore", Args: []ir.Expr{n(tex), coord(w), v}}}
+	}
+	return &ir.Module{
+		Structs: []ir.Struct{{Name: "TexParams", Fields: []ir.Field{{Name: "w", Type: ir.U32}, {Name: "k", Type: ir.F32}}}},
+		Bindings: []ir.Binding{
+			{Group: 0, Binding: 0, Space: ir.Uniform, Name: "tp", Type: ir.Named{Name: "TexParams"}},
+			{Group: 0, Binding: 1, Space: ir.Storage, Access: ir.Read, Name: "src", Type: ir.Array{Elem: ir.Vec{N: 4, Elem: ir.F32}}},
+			{Group: 0, Binding: 2, Space: ir.Storage, Access: ir.Write, Name: "disp", Type: ir.StorageTexture{Format: "rgba16float"}},
+			{Group: 0, Binding: 3, Space: ir.Storage, Access: ir.Write, Name: "slope", Type: ir.StorageTexture{Format: "rgba16float"}},
+		},
+		Kernels: []ir.Kernel{{
+			Name:          "two",
+			WorkgroupSize: [3]int{64, 1, 1},
+			Builtins:      []ir.Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+			Body: []ir.Stmt{
+				ir.Let{Name: "i", Value: ir.Member{E: n("gid"), Field: "x"}},
+				ir.If{
+					Cond: ir.Binary{Op: ">=", L: n("i"), R: ir.Call{Func: "arrayLength", Args: []ir.Expr{ir.AddrOf{E: n("src")}}}},
+					Then: []ir.Stmt{ir.Return{}},
+				},
+				ir.Let{Name: "v", Value: ir.Index{E: n("src"), Idx: n("i")}},
+				store("disp", ir.Member{E: n("tp"), Field: "w"}, ir.Binary{Op: "*", L: n("v"), R: ir.Member{E: n("tp"), Field: "k"}}),
+				store("slope", ir.Member{E: ir.Call{Func: "textureDimensions", Args: []ir.Expr{n("slope")}}, Field: "x"}, n("v")),
+			},
+		}},
+	}
+}
+
 func TestGatherESValidates(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -79,6 +114,7 @@ func TestGatherESValidates(t *testing.T) {
 	}{
 		{"scalebias", ir.ScaleBias(), "main", 1, 1},
 		{"mix", gatherMix(), "mix", 2, 2},
+		{"two textures", gatherTwoTextures(), "two", 1, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src, lay, err := gather.Emit(tc.mod, tc.kernel)

@@ -19,10 +19,14 @@ type Buffer struct {
 	Binding int    // the Elio @binding number, for hosts that keep the WebGPU slot
 }
 
-// Output is a written buffer: one RGBA color attachment.
+// Output is a written buffer or storage texture: one RGBA color attachment.
+// A storage texture's pixel (i % W, i / W) is the fragment's own pixel, so W
+// must equal the pass width (elio_width). The host creates the render target in
+// Format; the per-pixel byte cost of all outputs is at most 32.
 type Output struct {
 	Name     string // Elio binding name
 	Elem     string // "f32", "vec2" or "vec4"; unused channels are zero
+	Format   string // texture format ("rgba16float", "rgba32float", "r32float"); empty for a buffer
 	Location int    // layout(location = N) of the out variable
 	Variable string // GLSL out variable name, e.g. "dst_out"
 }
