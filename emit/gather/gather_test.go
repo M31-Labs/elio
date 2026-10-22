@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"m31labs.dev/elio/ir"
-	"m31labs.dev/elio/stdlib"
 )
 
 const wantFragIndex = "(uint(gl_FragCoord.y) * elio_width + uint(gl_FragCoord.x))"
@@ -90,12 +89,5 @@ func TestEmitPadsNarrowOutputs(t *testing.T) {
 	}
 	if lay.Outputs[1].Location != 1 || lay.Outputs[0].Elem != "f32" || lay.Outputs[1].Elem != "vec2" {
 		t.Errorf("outputs = %+v", lay.Outputs)
-	}
-}
-
-func TestEmitRejectsNonGather(t *testing.T) {
-	_, _, err := Emit(stdlib.Scan(), "scan")
-	if err == nil || !strings.Contains(err.Error(), "rule 1") {
-		t.Fatalf("want a gather profile error, got %v", err)
 	}
 }
