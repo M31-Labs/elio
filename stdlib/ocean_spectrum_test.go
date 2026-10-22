@@ -15,6 +15,22 @@ type oceanSpec struct {
 	gamma, spread, swell float64
 	windDir, swellDir    float64
 	tile, kMin, kMax     float64
+	loop                 float64 // dispersion loop period T_loop in seconds; 0 means the default 1000
+}
+
+// loopPeriod returns T_loop with the kernel's default applied.
+func (s oceanSpec) loopPeriod() float64 {
+	if s.loop <= 0 {
+		return 1000
+	}
+	return s.loop
+}
+
+// quantizedOmega is the kernel's looping dispersion: omega0 * floor(omega / omega0)
+// with omega0 = 2 pi / T_loop.
+func (s oceanSpec) quantizedOmega(k float64) float64 {
+	w0 := 2 * math.Pi / s.loopPeriod()
+	return w0 * math.Floor(math.Sqrt(oceanG*k)/w0)
 }
 
 func defaultSpec(cascade, n int) oceanSpec {
@@ -34,7 +50,7 @@ func (s oceanSpec) uniform() map[string]any {
 		"n": int64(s.n), "cascade": int64(s.cascade), "seed": int64(s.seed), "_pad": int64(0),
 		"windSpeed": s.windSpeed, "fetchKm": s.fetchKm, "gamma": s.gamma, "spread": s.spread,
 		"swell": s.swell, "windDir": s.windDir, "swellDir": s.swellDir, "tile": s.tile,
-		"kMin": s.kMin, "kMax": s.kMax, "_pad1": 0.0, "_pad2": 0.0,
+		"kMin": s.kMin, "kMax": s.kMax, "loopPeriod": s.loop, "_pad2": 0.0,
 	}
 }
 
@@ -126,7 +142,7 @@ func TestOceanSpectrumMatchesReference(t *testing.T) {
 				ix, iz := signedBin(x, n), signedBin(z, n)
 				kx, kz := dk*float64(ix), dk*float64(iz)
 				k := math.Hypot(kx, kz)
-				if want := math.Sqrt(oceanG * k); math.Abs(omega[z*n+x]-want) > 1e-12 {
+				if want := s.quantizedOmega(k); math.Abs(omega[z*n+x]-want) > 1e-12 {
 					t.Fatalf("omega (%d,%d) = %g want %g", ix, iz, omega[z*n+x], want)
 				}
 				var want [4]float64
@@ -256,4 +272,41 @@ func TestOceanSpectrumSignificantWaveHeight(t *testing.T) {
 	if mean := hsSum / seeds; math.Abs(mean-est) > 0.05*est {
 		t.Errorf("mean Hs %.3f m not within 5%% of the estimate %.3f m", mean, est)
 	}
+}
+
+// TestOceanSpectrumOmegaIsQuantized checks omega_q = omega0 floor(omega / omega0)
+// and reports how far it moves from the deep-water omega.
+func TestOceanSpectrumOmegaIsQuantized(t *testing.T) {
+	w0 := 2 * math.Pi / 1000
+	fetch := 300e3
+	wp := 22 * math.Pow(oceanG*oceanG/(9*fetch), 1.0/3)
+	var worstBand, worstAll float64
+	for c := 0; c < 4; c++ {
+		s := defaultSpec(c, 64)
+		h0, omega := runOceanSpectrum(t, s)
+		dk := 2 * math.Pi / s.tile
+		for z := 0; z < s.n; z++ {
+			for x := 0; x < s.n; x++ {
+				if h0[z*s.n+x][0] == 0 && h0[z*s.n+x][1] == 0 {
+					continue
+				}
+				k := dk * math.Hypot(float64(signedBin(x, s.n)), float64(signedBin(z, s.n)))
+				w := math.Sqrt(oceanG * k)
+				wq := omega[z*s.n+x]
+				if m := wq / w0; math.Abs(m-math.Round(m)) > 1e-9 {
+					t.Fatalf("omega_q %g is not a multiple of omega0 %g", wq, w0)
+				}
+				rel := (w - wq) / w
+				if rel < 0 || rel > w0/w+1e-12 {
+					t.Fatalf("relative change %g outside [0, omega0/omega = %g]", rel, w0/w)
+				}
+				worstAll = math.Max(worstAll, rel)
+				if w >= 0.5*wp && w <= 3*wp {
+					worstBand = math.Max(worstBand, rel)
+				}
+			}
+		}
+	}
+	t.Logf("omega_q vs omega: largest relative change %.3g%% in the energetic band (omega in [0.5, 3] omega_p = [%.2f, %.2f] rad/s), %.3g%% over all non-zero bins",
+		100*worstBand, 0.5*wp, 3*wp, 100*worstAll)
 }

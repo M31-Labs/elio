@@ -9,8 +9,9 @@
 //   h(k, t) = h0(k) e^{+i w t} + conj h0(-k) e^{-i w t},   w = omega, t seconds
 //
 // h(-k, t) = conj h(k, t), so every field below is Hermitian and its inverse
-// FFT is real. The host should reduce t (for example modulo a long period) so
-// that w t stays small in f32.
+// FFT is real. omega is quantized to whole cycles per `loop` seconds (default 1000),
+// so the field repeats with that period: the host passes t mod loop and f32 time
+// never grows. Any t works in float64.
 //
 // Fields (inverse FFT convention e^{+i k.x}, so d/dx multiplies by i kx;
 // k = (kx, kz) in rad/m, kx = 2 pi ix / L; the sign of the horizontal
@@ -44,7 +45,7 @@ struct OceanEvolveParams {
   _pad2: u32;
   t: f32;
   tile: f32;
-  _pad3: f32;
+  loop: f32;
   _pad4: f32;
 }
 
@@ -72,7 +73,23 @@ struct OceanEvolveParams {
   if kk > 0.0 { inv = 1.0 / kk; }
 
   let spec = h0[i];
-  let phase = omega[i] * ev.t;
+  // omega[i] is omega0 times a whole number m (ocean_spectrum quantizes it), with
+  // omega0 = 2 pi / loop. The phase is 2 pi fract(m t / loop), computed so f32
+  // keeps its accuracy: split t = t1 + t2 with t1 = floor(t), so m t1 is an exact
+  // integer (m < 3100 and t1 < 1000 stay under 2^24), reduce it modulo loop
+  // exactly, then add m t2 (below 3100 s). Needs an integer-valued loop;
+  // the phase error stays near 1e-6 rad.
+  var tloop = ev.loop;
+  if tloop <= 0.0 { tloop = 1000.0; }
+  let mcycles = floor(omega[i] * tloop / 6.283185307179586 + 0.5);
+  let t1 = floor(ev.t);
+  let t2 = ev.t - t1;
+  let big = mcycles * t1;
+  var rem = big - floor(big / tloop) * tloop;
+  if rem < 0.0 { rem = rem + tloop; }
+  if rem >= tloop { rem = rem - tloop; }
+  let cyc = (rem + mcycles * t2) / tloop;
+  let phase = 6.283185307179586 * (cyc - floor(cyc));
   let cs = cos(phase);
   let sn = sin(phase);
   // h = (x + i y)(cs + i sn) + (z + i w)(cs - i sn)
