@@ -39,7 +39,7 @@ func TestEmitExports(t *testing.T) {
 		"export const miniKernelWGSL = `", "export const miniKernelEntry = \"mini\";",
 		"export const miniKernelWorkgroup = [64, 1, 1];",
 		"export const miniKernelBindings", "storage-texture", "rgba16float",
-		"export const miniKernelUniforms", "\"offset\": 4",
+		"export const miniKernelUniforms", "\"offset\":4",
 		"export const miniKernelGLSL = `", "export const miniKernelGatherLayout",
 	} {
 		if !strings.Contains(out, want) {
@@ -157,8 +157,8 @@ func TestEmitSampledTextureBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`"kind": "texture"`, "texture_2d<f32>", "uniform highp sampler2D src;",
-		`"sampler": "src"`, `"length": ""`,
+		`"kind":"texture"`, "texture_2d<f32>", "uniform highp sampler2D src;",
+		`"sampler":"src"`, `"length":""`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

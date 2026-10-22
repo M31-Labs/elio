@@ -116,6 +116,14 @@ func (e *expander) plain(p Pass, env map[string]int, prefix, when string) Pass {
 		q.Bindings = make([]Binding, len(p.Bindings))
 		for i, b := range p.Bindings {
 			b.Resource = e.resolve(b.Resource)
+			if b.LevelAt != nil {
+				if iv, in := env[b.LevelAt.Index]; in {
+					b.Level = b.LevelAt.eval(iv)
+				} else {
+					e.errf("pass %q: binding %q: index %q is not in scope", q.Name, b.Name, b.LevelAt.Index)
+				}
+				b.LevelAt = nil
+			}
 			q.Bindings[i] = b
 		}
 	}
@@ -124,6 +132,13 @@ func (e *expander) plain(p Pass, env map[string]int, prefix, when string) Pass {
 		for i, u := range p.Uniforms {
 			vals := make(map[string]any, len(u.Values))
 			for k, v := range u.Values {
+				if x, ok := v.(IndexExpr); ok {
+					if iv, in := env[x.Index]; in {
+						v = x.eval(iv)
+					} else {
+						e.errf("pass %q: uniform %q field %q: index %q is not in scope", q.Name, u.Name, k, x.Index)
+					}
+				}
 				if s, ok := v.(string); ok {
 					if n, isRef := refName(s); isRef {
 						if iv, in := env[n]; in {

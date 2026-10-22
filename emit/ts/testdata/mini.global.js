@@ -46,76 +46,9 @@ fn mini(@builtin(global_invocation_id) gid : vec3<u32>) {
 `,
       entry: "mini",
       workgroup: [64, 1, 1],
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "p",
-    "kind": "uniform",
-    "elementType": "P"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "src",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "dst",
-    "kind": "storage-texture",
-    "format": "rgba16float",
-    "elementType": "vec4<f32>"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "p",
-    "struct": "P",
-    "size": 8,
-    "fields": [
-      {
-        "name": "n",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "k",
-        "type": "f32",
-        "offset": 4,
-        "size": 4
-      }
-    ]
-  }
-],
-      uniformsStd140: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "p",
-    "struct": "P",
-    "size": 16,
-    "fields": [
-      {
-        "name": "n",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "k",
-        "type": "f32",
-        "offset": 4,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"p","kind":"uniform","elementType":"P"},{"group":0,"binding":1,"name":"src","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":2,"name":"dst","kind":"storage-texture","format":"rgba16float","elementType":"vec4<f32>"}],
+      uniforms: [{"group":0,"binding":0,"name":"p","struct":"P","size":8,"fields":[{"name":"n","type":"u32","offset":0,"size":4},{"name":"k","type":"f32","offset":4,"size":4}]}],
+      uniformsStd140: [{"group":0,"binding":0,"name":"p","struct":"P","size":16,"fields":[{"name":"n","type":"u32","offset":0,"size":4},{"name":"k","type":"f32","offset":4,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -144,36 +77,7 @@ void main() {
   dst_out = (src_at(i) * p.k);
 }
 `,
-      gatherLayout: {
-  "kernel": "mini",
-  "inputs": [
-    {
-      "name": "src",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "src_tex",
-      "length": "src_len",
-      "binding": 1
-    }
-  ],
-  "outputs": [
-    {
-      "name": "dst",
-      "elem": "vec4",
-      "format": "rgba16float",
-      "location": 0,
-      "variable": "dst_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "p",
-      "block": "P_ubo",
-      "struct": "P",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"mini","inputs":[{"name":"src","kind":"buffer","elem":"vec4","sampler":"src_tex","length":"src_len","binding":1}],"outputs":[{"name":"dst","elem":"vec4","format":"rgba16float","location":0,"variable":"dst_out"}],"uniforms":[{"name":"p","block":"P_ubo","struct":"P","binding":0}]},
     },
     },
   });

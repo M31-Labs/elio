@@ -27,136 +27,8 @@
     // --- ocean_spectrum ---
     oceanSpectrum: {
       entry: "ocean_spectrum",
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "spec",
-    "kind": "uniform",
-    "elementType": "OceanSpectrumParams"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "h0",
-    "kind": "storage-rw",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "omega",
-    "kind": "storage-rw",
-    "elementType": "f32"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "spec",
-    "struct": "OceanSpectrumParams",
-    "size": 64,
-    "fields": [
-      {
-        "name": "n",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "cascade",
-        "type": "u32",
-        "offset": 4,
-        "size": 4
-      },
-      {
-        "name": "seed",
-        "type": "u32",
-        "offset": 8,
-        "size": 4
-      },
-      {
-        "name": "_pad",
-        "type": "u32",
-        "offset": 12,
-        "size": 4
-      },
-      {
-        "name": "windSpeed",
-        "type": "f32",
-        "offset": 16,
-        "size": 4
-      },
-      {
-        "name": "fetchKm",
-        "type": "f32",
-        "offset": 20,
-        "size": 4
-      },
-      {
-        "name": "gamma",
-        "type": "f32",
-        "offset": 24,
-        "size": 4
-      },
-      {
-        "name": "spread",
-        "type": "f32",
-        "offset": 28,
-        "size": 4
-      },
-      {
-        "name": "swell",
-        "type": "f32",
-        "offset": 32,
-        "size": 4
-      },
-      {
-        "name": "windDir",
-        "type": "f32",
-        "offset": 36,
-        "size": 4
-      },
-      {
-        "name": "swellDir",
-        "type": "f32",
-        "offset": 40,
-        "size": 4
-      },
-      {
-        "name": "tile",
-        "type": "f32",
-        "offset": 44,
-        "size": 4
-      },
-      {
-        "name": "kMin",
-        "type": "f32",
-        "offset": 48,
-        "size": 4
-      },
-      {
-        "name": "kMax",
-        "type": "f32",
-        "offset": 52,
-        "size": 4
-      },
-      {
-        "name": "loopPeriod",
-        "type": "f32",
-        "offset": 56,
-        "size": 4
-      },
-      {
-        "name": "_pad2",
-        "type": "f32",
-        "offset": 60,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"spec","kind":"uniform","elementType":"OceanSpectrumParams"},{"group":0,"binding":1,"name":"h0","kind":"storage-rw","elementType":"vec4<f32>"},{"group":0,"binding":2,"name":"omega","kind":"storage-rw","elementType":"f32"}],
+      uniforms: [{"group":0,"binding":0,"name":"spec","struct":"OceanSpectrumParams","size":64,"fields":[{"name":"n","type":"u32","offset":0,"size":4},{"name":"cascade","type":"u32","offset":4,"size":4},{"name":"seed","type":"u32","offset":8,"size":4},{"name":"_pad","type":"u32","offset":12,"size":4},{"name":"windSpeed","type":"f32","offset":16,"size":4},{"name":"fetchKm","type":"f32","offset":20,"size":4},{"name":"gamma","type":"f32","offset":24,"size":4},{"name":"spread","type":"f32","offset":28,"size":4},{"name":"swell","type":"f32","offset":32,"size":4},{"name":"windDir","type":"f32","offset":36,"size":4},{"name":"swellDir","type":"f32","offset":40,"size":4},{"name":"tile","type":"f32","offset":44,"size":4},{"name":"kMin","type":"f32","offset":48,"size":4},{"name":"kMax","type":"f32","offset":52,"size":4},{"name":"loopPeriod","type":"f32","offset":56,"size":4},{"name":"_pad2","type":"f32","offset":60,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -345,135 +217,14 @@ void main() {
   h0_out = vec4(hr, hi, mr, mi);
 }
 `,
-      gatherLayout: {
-  "kernel": "ocean_spectrum",
-  "inputs": [],
-  "outputs": [
-    {
-      "name": "h0",
-      "elem": "vec4",
-      "format": "",
-      "location": 0,
-      "variable": "h0_out"
-    },
-    {
-      "name": "omega",
-      "elem": "f32",
-      "format": "",
-      "location": 1,
-      "variable": "omega_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "spec",
-      "block": "OceanSpectrumParams_ubo",
-      "struct": "OceanSpectrumParams",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"ocean_spectrum","inputs":[],"outputs":[{"name":"h0","elem":"vec4","format":"","location":0,"variable":"h0_out"},{"name":"omega","elem":"f32","format":"","location":1,"variable":"omega_out"}],"uniforms":[{"name":"spec","block":"OceanSpectrumParams_ubo","struct":"OceanSpectrumParams","binding":0}]},
     },
 
     // --- ocean_evolve ---
     oceanEvolve: {
       entry: "ocean_evolve",
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "ev",
-    "kind": "uniform",
-    "elementType": "OceanEvolveParams"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "h0",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "omega",
-    "kind": "storage-read",
-    "elementType": "f32"
-  },
-  {
-    "group": 0,
-    "binding": 3,
-    "name": "outA",
-    "kind": "storage-rw",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 4,
-    "name": "outB",
-    "kind": "storage-rw",
-    "elementType": "vec4<f32>"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "ev",
-    "struct": "OceanEvolveParams",
-    "size": 32,
-    "fields": [
-      {
-        "name": "n",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "_pad0",
-        "type": "u32",
-        "offset": 4,
-        "size": 4
-      },
-      {
-        "name": "_pad1",
-        "type": "u32",
-        "offset": 8,
-        "size": 4
-      },
-      {
-        "name": "_pad2",
-        "type": "u32",
-        "offset": 12,
-        "size": 4
-      },
-      {
-        "name": "t",
-        "type": "f32",
-        "offset": 16,
-        "size": 4
-      },
-      {
-        "name": "tile",
-        "type": "f32",
-        "offset": 20,
-        "size": 4
-      },
-      {
-        "name": "loopPeriod",
-        "type": "f32",
-        "offset": 24,
-        "size": 4
-      },
-      {
-        "name": "_pad4",
-        "type": "f32",
-        "offset": 28,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"ev","kind":"uniform","elementType":"OceanEvolveParams"},{"group":0,"binding":1,"name":"h0","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":2,"name":"omega","kind":"storage-read","elementType":"f32"},{"group":0,"binding":3,"name":"outA","kind":"storage-rw","elementType":"vec4<f32>"},{"group":0,"binding":4,"name":"outB","kind":"storage-rw","elementType":"vec4<f32>"}],
+      uniforms: [{"group":0,"binding":0,"name":"ev","struct":"OceanEvolveParams","size":32,"fields":[{"name":"n","type":"u32","offset":0,"size":4},{"name":"_pad0","type":"u32","offset":4,"size":4},{"name":"_pad1","type":"u32","offset":8,"size":4},{"name":"_pad2","type":"u32","offset":12,"size":4},{"name":"t","type":"f32","offset":16,"size":4},{"name":"tile","type":"f32","offset":20,"size":4},{"name":"loopPeriod","type":"f32","offset":24,"size":4},{"name":"_pad4","type":"f32","offset":28,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -571,154 +322,14 @@ void main() {
   outB_out = vec4((szr - (axx * hi)), (szi + (axx * hr)), ((azz * hr) - (axz * hi)), ((azz * hi) + (axz * hr)));
 }
 `,
-      gatherLayout: {
-  "kernel": "ocean_evolve",
-  "inputs": [
-    {
-      "name": "h0",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "h0_tex",
-      "length": "h0_len",
-      "binding": 1
-    },
-    {
-      "name": "omega",
-      "kind": "buffer",
-      "elem": "f32",
-      "sampler": "omega_tex",
-      "length": "omega_len",
-      "binding": 2
-    }
-  ],
-  "outputs": [
-    {
-      "name": "outA",
-      "elem": "vec4",
-      "format": "",
-      "location": 0,
-      "variable": "outA_out"
-    },
-    {
-      "name": "outB",
-      "elem": "vec4",
-      "format": "",
-      "location": 1,
-      "variable": "outB_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "ev",
-      "block": "OceanEvolveParams_ubo",
-      "struct": "OceanEvolveParams",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"ocean_evolve","inputs":[{"name":"h0","kind":"buffer","elem":"vec4","sampler":"h0_tex","length":"h0_len","binding":1},{"name":"omega","kind":"buffer","elem":"f32","sampler":"omega_tex","length":"omega_len","binding":2}],"outputs":[{"name":"outA","elem":"vec4","format":"","location":0,"variable":"outA_out"},{"name":"outB","elem":"vec4","format":"","location":1,"variable":"outB_out"}],"uniforms":[{"name":"ev","block":"OceanEvolveParams_ubo","struct":"OceanEvolveParams","binding":0}]},
     },
 
     // --- ocean_assemble ---
     oceanAssemble: {
       entry: "ocean_assemble",
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "assem",
-    "kind": "uniform",
-    "elementType": "OceanAssembleParams"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "fieldA",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "fieldB",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 3,
-    "name": "disp",
-    "kind": "storage-texture",
-    "format": "rgba16float",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 4,
-    "name": "slope",
-    "kind": "storage-texture",
-    "format": "rgba16float",
-    "elementType": "vec4<f32>"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "assem",
-    "struct": "OceanAssembleParams",
-    "size": 32,
-    "fields": [
-      {
-        "name": "n",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "_pad0",
-        "type": "u32",
-        "offset": 4,
-        "size": 4
-      },
-      {
-        "name": "_pad1",
-        "type": "u32",
-        "offset": 8,
-        "size": 4
-      },
-      {
-        "name": "_pad2",
-        "type": "u32",
-        "offset": 12,
-        "size": 4
-      },
-      {
-        "name": "lambda",
-        "type": "f32",
-        "offset": 16,
-        "size": 4
-      },
-      {
-        "name": "_pad3",
-        "type": "f32",
-        "offset": 20,
-        "size": 4
-      },
-      {
-        "name": "_pad4",
-        "type": "f32",
-        "offset": 24,
-        "size": 4
-      },
-      {
-        "name": "_pad5",
-        "type": "f32",
-        "offset": 28,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"assem","kind":"uniform","elementType":"OceanAssembleParams"},{"group":0,"binding":1,"name":"fieldA","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":2,"name":"fieldB","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":3,"name":"disp","kind":"storage-texture","format":"rgba16float","elementType":"vec4<f32>"},{"group":0,"binding":4,"name":"slope","kind":"storage-texture","format":"rgba16float","elementType":"vec4<f32>"}],
+      uniforms: [{"group":0,"binding":0,"name":"assem","struct":"OceanAssembleParams","size":32,"fields":[{"name":"n","type":"u32","offset":0,"size":4},{"name":"_pad0","type":"u32","offset":4,"size":4},{"name":"_pad1","type":"u32","offset":8,"size":4},{"name":"_pad2","type":"u32","offset":12,"size":4},{"name":"lambda","type":"f32","offset":16,"size":4},{"name":"_pad3","type":"f32","offset":20,"size":4},{"name":"_pad4","type":"f32","offset":24,"size":4},{"name":"_pad5","type":"f32","offset":28,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -765,115 +376,14 @@ void main() {
   slope_out = vec4(a.w, b.x, (l * b.y), (l * b.z));
 }
 `,
-      gatherLayout: {
-  "kernel": "ocean_assemble",
-  "inputs": [
-    {
-      "name": "fieldA",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "fieldA_tex",
-      "length": "fieldA_len",
-      "binding": 1
-    },
-    {
-      "name": "fieldB",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "fieldB_tex",
-      "length": "fieldB_len",
-      "binding": 2
-    }
-  ],
-  "outputs": [
-    {
-      "name": "disp",
-      "elem": "vec4",
-      "format": "rgba16float",
-      "location": 0,
-      "variable": "disp_out"
-    },
-    {
-      "name": "slope",
-      "elem": "vec4",
-      "format": "rgba16float",
-      "location": 1,
-      "variable": "slope_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "assem",
-      "block": "OceanAssembleParams_ubo",
-      "struct": "OceanAssembleParams",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"ocean_assemble","inputs":[{"name":"fieldA","kind":"buffer","elem":"vec4","sampler":"fieldA_tex","length":"fieldA_len","binding":1},{"name":"fieldB","kind":"buffer","elem":"vec4","sampler":"fieldB_tex","length":"fieldB_len","binding":2}],"outputs":[{"name":"disp","elem":"vec4","format":"rgba16float","location":0,"variable":"disp_out"},{"name":"slope","elem":"vec4","format":"rgba16float","location":1,"variable":"slope_out"}],"uniforms":[{"name":"assem","block":"OceanAssembleParams_ubo","struct":"OceanAssembleParams","binding":0}]},
     },
 
     // --- ocean_mip ---
     oceanMip: {
       entry: "ocean_mip",
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "mip",
-    "kind": "uniform",
-    "elementType": "OceanMipParams"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "src",
-    "kind": "texture",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "dst",
-    "kind": "storage-texture",
-    "format": "rgba16float",
-    "elementType": "vec4<f32>"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "mip",
-    "struct": "OceanMipParams",
-    "size": 16,
-    "fields": [
-      {
-        "name": "srcLevel",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "dstWidth",
-        "type": "u32",
-        "offset": 4,
-        "size": 4
-      },
-      {
-        "name": "dstHeight",
-        "type": "u32",
-        "offset": 8,
-        "size": 4
-      },
-      {
-        "name": "pad",
-        "type": "u32",
-        "offset": 12,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"mip","kind":"uniform","elementType":"OceanMipParams"},{"group":0,"binding":1,"name":"src","kind":"texture","elementType":"vec4<f32>"},{"group":0,"binding":2,"name":"dst","kind":"storage-texture","format":"rgba16float","elementType":"vec4<f32>"}],
+      uniforms: [{"group":0,"binding":0,"name":"mip","struct":"OceanMipParams","size":16,"fields":[{"name":"srcLevel","type":"u32","offset":0,"size":4},{"name":"dstWidth","type":"u32","offset":4,"size":4},{"name":"dstHeight","type":"u32","offset":8,"size":4},{"name":"pad","type":"u32","offset":12,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -907,255 +417,14 @@ void main() {
   dst_out = (sum * 0.25);
 }
 `,
-      gatherLayout: {
-  "kernel": "ocean_mip",
-  "inputs": [
-    {
-      "name": "src",
-      "kind": "texture",
-      "elem": "vec4",
-      "sampler": "src",
-      "length": "",
-      "binding": 1
-    }
-  ],
-  "outputs": [
-    {
-      "name": "dst",
-      "elem": "vec4",
-      "format": "rgba16float",
-      "location": 0,
-      "variable": "dst_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "mip",
-      "block": "OceanMipParams_ubo",
-      "struct": "OceanMipParams",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"ocean_mip","inputs":[{"name":"src","kind":"texture","elem":"vec4","sampler":"src","length":"","binding":1}],"outputs":[{"name":"dst","elem":"vec4","format":"rgba16float","location":0,"variable":"dst_out"}],"uniforms":[{"name":"mip","block":"OceanMipParams_ubo","struct":"OceanMipParams","binding":0}]},
     },
 
     // --- ocean_foam ---
     oceanFoam: {
       entry: "ocean_foam",
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "foam",
-    "kind": "uniform",
-    "elementType": "OceanFoamParams"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "foamIn",
-    "kind": "storage-read",
-    "elementType": "f32"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "fieldB0",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 3,
-    "name": "fieldB1",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 4,
-    "name": "fieldB2",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 5,
-    "name": "fieldB3",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 6,
-    "name": "foamOut",
-    "kind": "storage-rw",
-    "elementType": "f32"
-  },
-  {
-    "group": 0,
-    "binding": 7,
-    "name": "foamTex",
-    "kind": "storage-texture",
-    "format": "rgba16float",
-    "elementType": "vec4<f32>"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "foam",
-    "struct": "OceanFoamParams",
-    "size": 96,
-    "fields": [
-      {
-        "name": "width",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "cascades",
-        "type": "u32",
-        "offset": 4,
-        "size": 4
-      },
-      {
-        "name": "_pad0",
-        "type": "u32",
-        "offset": 8,
-        "size": 4
-      },
-      {
-        "name": "_pad1",
-        "type": "u32",
-        "offset": 12,
-        "size": 4
-      },
-      {
-        "name": "originX",
-        "type": "i32",
-        "offset": 16,
-        "size": 4
-      },
-      {
-        "name": "originZ",
-        "type": "i32",
-        "offset": 20,
-        "size": 4
-      },
-      {
-        "name": "shiftX",
-        "type": "i32",
-        "offset": 24,
-        "size": 4
-      },
-      {
-        "name": "shiftZ",
-        "type": "i32",
-        "offset": 28,
-        "size": 4
-      },
-      {
-        "name": "dt",
-        "type": "f32",
-        "offset": 32,
-        "size": 4
-      },
-      {
-        "name": "tau",
-        "type": "f32",
-        "offset": 36,
-        "size": 4
-      },
-      {
-        "name": "threshold",
-        "type": "f32",
-        "offset": 40,
-        "size": 4
-      },
-      {
-        "name": "gain",
-        "type": "f32",
-        "offset": 44,
-        "size": 4
-      },
-      {
-        "name": "lambda",
-        "type": "f32",
-        "offset": 48,
-        "size": 4
-      },
-      {
-        "name": "cell",
-        "type": "f32",
-        "offset": 52,
-        "size": 4
-      },
-      {
-        "name": "_pad2",
-        "type": "f32",
-        "offset": 56,
-        "size": 4
-      },
-      {
-        "name": "_pad3",
-        "type": "f32",
-        "offset": 60,
-        "size": 4
-      },
-      {
-        "name": "n0",
-        "type": "u32",
-        "offset": 64,
-        "size": 4
-      },
-      {
-        "name": "n1",
-        "type": "u32",
-        "offset": 68,
-        "size": 4
-      },
-      {
-        "name": "n2",
-        "type": "u32",
-        "offset": 72,
-        "size": 4
-      },
-      {
-        "name": "n3",
-        "type": "u32",
-        "offset": 76,
-        "size": 4
-      },
-      {
-        "name": "size0",
-        "type": "f32",
-        "offset": 80,
-        "size": 4
-      },
-      {
-        "name": "size1",
-        "type": "f32",
-        "offset": 84,
-        "size": 4
-      },
-      {
-        "name": "size2",
-        "type": "f32",
-        "offset": 88,
-        "size": 4
-      },
-      {
-        "name": "size3",
-        "type": "f32",
-        "offset": 92,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"foam","kind":"uniform","elementType":"OceanFoamParams"},{"group":0,"binding":1,"name":"foamIn","kind":"storage-read","elementType":"f32"},{"group":0,"binding":2,"name":"fieldB0","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":3,"name":"fieldB1","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":4,"name":"fieldB2","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":5,"name":"fieldB3","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":6,"name":"foamOut","kind":"storage-rw","elementType":"f32"},{"group":0,"binding":7,"name":"foamTex","kind":"storage-texture","format":"rgba16float","elementType":"vec4<f32>"}],
+      uniforms: [{"group":0,"binding":0,"name":"foam","struct":"OceanFoamParams","size":96,"fields":[{"name":"width","type":"u32","offset":0,"size":4},{"name":"cascades","type":"u32","offset":4,"size":4},{"name":"_pad0","type":"u32","offset":8,"size":4},{"name":"_pad1","type":"u32","offset":12,"size":4},{"name":"originX","type":"i32","offset":16,"size":4},{"name":"originZ","type":"i32","offset":20,"size":4},{"name":"shiftX","type":"i32","offset":24,"size":4},{"name":"shiftZ","type":"i32","offset":28,"size":4},{"name":"dt","type":"f32","offset":32,"size":4},{"name":"tau","type":"f32","offset":36,"size":4},{"name":"threshold","type":"f32","offset":40,"size":4},{"name":"gain","type":"f32","offset":44,"size":4},{"name":"lambda","type":"f32","offset":48,"size":4},{"name":"cell","type":"f32","offset":52,"size":4},{"name":"_pad2","type":"f32","offset":56,"size":4},{"name":"_pad3","type":"f32","offset":60,"size":4},{"name":"n0","type":"u32","offset":64,"size":4},{"name":"n1","type":"u32","offset":68,"size":4},{"name":"n2","type":"u32","offset":72,"size":4},{"name":"n3","type":"u32","offset":76,"size":4},{"name":"size0","type":"f32","offset":80,"size":4},{"name":"size1","type":"f32","offset":84,"size":4},{"name":"size2","type":"f32","offset":88,"size":4},{"name":"size3","type":"f32","offset":92,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -1331,138 +600,14 @@ void main() {
   foamTex_out = vec4(f, jac, 0.0, 1.0);
 }
 `,
-      gatherLayout: {
-  "kernel": "ocean_foam",
-  "inputs": [
-    {
-      "name": "foamIn",
-      "kind": "buffer",
-      "elem": "f32",
-      "sampler": "foamIn_tex",
-      "length": "foamIn_len",
-      "binding": 1
-    },
-    {
-      "name": "fieldB0",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "fieldB0_tex",
-      "length": "fieldB0_len",
-      "binding": 2
-    },
-    {
-      "name": "fieldB1",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "fieldB1_tex",
-      "length": "fieldB1_len",
-      "binding": 3
-    },
-    {
-      "name": "fieldB2",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "fieldB2_tex",
-      "length": "fieldB2_len",
-      "binding": 4
-    },
-    {
-      "name": "fieldB3",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "fieldB3_tex",
-      "length": "fieldB3_len",
-      "binding": 5
-    }
-  ],
-  "outputs": [
-    {
-      "name": "foamOut",
-      "elem": "f32",
-      "format": "",
-      "location": 0,
-      "variable": "foamOut_out"
-    },
-    {
-      "name": "foamTex",
-      "elem": "vec4",
-      "format": "rgba16float",
-      "location": 1,
-      "variable": "foamTex_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "foam",
-      "block": "OceanFoamParams_ubo",
-      "struct": "OceanFoamParams",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"ocean_foam","inputs":[{"name":"foamIn","kind":"buffer","elem":"f32","sampler":"foamIn_tex","length":"foamIn_len","binding":1},{"name":"fieldB0","kind":"buffer","elem":"vec4","sampler":"fieldB0_tex","length":"fieldB0_len","binding":2},{"name":"fieldB1","kind":"buffer","elem":"vec4","sampler":"fieldB1_tex","length":"fieldB1_len","binding":3},{"name":"fieldB2","kind":"buffer","elem":"vec4","sampler":"fieldB2_tex","length":"fieldB2_len","binding":4},{"name":"fieldB3","kind":"buffer","elem":"vec4","sampler":"fieldB3_tex","length":"fieldB3_len","binding":5}],"outputs":[{"name":"foamOut","elem":"f32","format":"","location":0,"variable":"foamOut_out"},{"name":"foamTex","elem":"vec4","format":"rgba16float","location":1,"variable":"foamTex_out"}],"uniforms":[{"name":"foam","block":"OceanFoamParams_ubo","struct":"OceanFoamParams","binding":0}]},
     },
 
     // --- fft_gather_64 ---
     fftGather64: {
       entry: "fft_stage",
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "fft",
-    "kind": "uniform",
-    "elementType": "FFTStage"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "src",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "dst",
-    "kind": "storage-rw",
-    "elementType": "vec4<f32>"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "fft",
-    "struct": "FFTStage",
-    "size": 16,
-    "fields": [
-      {
-        "name": "n",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "stage",
-        "type": "u32",
-        "offset": 4,
-        "size": 4
-      },
-      {
-        "name": "axis",
-        "type": "u32",
-        "offset": 8,
-        "size": 4
-      },
-      {
-        "name": "_pad",
-        "type": "u32",
-        "offset": 12,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"fft","kind":"uniform","elementType":"FFTStage"},{"group":0,"binding":1,"name":"src","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":2,"name":"dst","kind":"storage-rw","elementType":"vec4<f32>"}],
+      uniforms: [{"group":0,"binding":0,"name":"fft","struct":"FFTStage","size":16,"fields":[{"name":"n","type":"u32","offset":0,"size":4},{"name":"stage","type":"u32","offset":4,"size":4},{"name":"axis","type":"u32","offset":8,"size":4},{"name":"_pad","type":"u32","offset":12,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -1520,99 +665,14 @@ void main() {
   }
 }
 `,
-      gatherLayout: {
-  "kernel": "fft_stage",
-  "inputs": [
-    {
-      "name": "src",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "src_tex",
-      "length": "src_len",
-      "binding": 1
-    }
-  ],
-  "outputs": [
-    {
-      "name": "dst",
-      "elem": "vec4",
-      "format": "",
-      "location": 0,
-      "variable": "dst_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "fft",
-      "block": "FFTStage_ubo",
-      "struct": "FFTStage",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"fft_stage","inputs":[{"name":"src","kind":"buffer","elem":"vec4","sampler":"src_tex","length":"src_len","binding":1}],"outputs":[{"name":"dst","elem":"vec4","format":"","location":0,"variable":"dst_out"}],"uniforms":[{"name":"fft","block":"FFTStage_ubo","struct":"FFTStage","binding":0}]},
     },
 
     // --- fft_gather_128 ---
     fftGather128: {
       entry: "fft_stage",
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "fft",
-    "kind": "uniform",
-    "elementType": "FFTStage"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "src",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "dst",
-    "kind": "storage-rw",
-    "elementType": "vec4<f32>"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "fft",
-    "struct": "FFTStage",
-    "size": 16,
-    "fields": [
-      {
-        "name": "n",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "stage",
-        "type": "u32",
-        "offset": 4,
-        "size": 4
-      },
-      {
-        "name": "axis",
-        "type": "u32",
-        "offset": 8,
-        "size": 4
-      },
-      {
-        "name": "_pad",
-        "type": "u32",
-        "offset": 12,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"fft","kind":"uniform","elementType":"FFTStage"},{"group":0,"binding":1,"name":"src","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":2,"name":"dst","kind":"storage-rw","elementType":"vec4<f32>"}],
+      uniforms: [{"group":0,"binding":0,"name":"fft","struct":"FFTStage","size":16,"fields":[{"name":"n","type":"u32","offset":0,"size":4},{"name":"stage","type":"u32","offset":4,"size":4},{"name":"axis","type":"u32","offset":8,"size":4},{"name":"_pad","type":"u32","offset":12,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -1670,99 +730,14 @@ void main() {
   }
 }
 `,
-      gatherLayout: {
-  "kernel": "fft_stage",
-  "inputs": [
-    {
-      "name": "src",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "src_tex",
-      "length": "src_len",
-      "binding": 1
-    }
-  ],
-  "outputs": [
-    {
-      "name": "dst",
-      "elem": "vec4",
-      "format": "",
-      "location": 0,
-      "variable": "dst_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "fft",
-      "block": "FFTStage_ubo",
-      "struct": "FFTStage",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"fft_stage","inputs":[{"name":"src","kind":"buffer","elem":"vec4","sampler":"src_tex","length":"src_len","binding":1}],"outputs":[{"name":"dst","elem":"vec4","format":"","location":0,"variable":"dst_out"}],"uniforms":[{"name":"fft","block":"FFTStage_ubo","struct":"FFTStage","binding":0}]},
     },
 
     // --- fft_gather_256 ---
     fftGather256: {
       entry: "fft_stage",
-      bindings: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "fft",
-    "kind": "uniform",
-    "elementType": "FFTStage"
-  },
-  {
-    "group": 0,
-    "binding": 1,
-    "name": "src",
-    "kind": "storage-read",
-    "elementType": "vec4<f32>"
-  },
-  {
-    "group": 0,
-    "binding": 2,
-    "name": "dst",
-    "kind": "storage-rw",
-    "elementType": "vec4<f32>"
-  }
-],
-      uniforms: [
-  {
-    "group": 0,
-    "binding": 0,
-    "name": "fft",
-    "struct": "FFTStage",
-    "size": 16,
-    "fields": [
-      {
-        "name": "n",
-        "type": "u32",
-        "offset": 0,
-        "size": 4
-      },
-      {
-        "name": "stage",
-        "type": "u32",
-        "offset": 4,
-        "size": 4
-      },
-      {
-        "name": "axis",
-        "type": "u32",
-        "offset": 8,
-        "size": 4
-      },
-      {
-        "name": "_pad",
-        "type": "u32",
-        "offset": 12,
-        "size": 4
-      }
-    ]
-  }
-],
+      bindings: [{"group":0,"binding":0,"name":"fft","kind":"uniform","elementType":"FFTStage"},{"group":0,"binding":1,"name":"src","kind":"storage-read","elementType":"vec4<f32>"},{"group":0,"binding":2,"name":"dst","kind":"storage-rw","elementType":"vec4<f32>"}],
+      uniforms: [{"group":0,"binding":0,"name":"fft","struct":"FFTStage","size":16,"fields":[{"name":"n","type":"u32","offset":0,"size":4},{"name":"stage","type":"u32","offset":4,"size":4},{"name":"axis","type":"u32","offset":8,"size":4},{"name":"_pad","type":"u32","offset":12,"size":4}]}],
       glsl: `#version 300 es
 precision highp float;
 precision highp int;
@@ -1820,36 +795,7 @@ void main() {
   }
 }
 `,
-      gatherLayout: {
-  "kernel": "fft_stage",
-  "inputs": [
-    {
-      "name": "src",
-      "kind": "buffer",
-      "elem": "vec4",
-      "sampler": "src_tex",
-      "length": "src_len",
-      "binding": 1
-    }
-  ],
-  "outputs": [
-    {
-      "name": "dst",
-      "elem": "vec4",
-      "format": "",
-      "location": 0,
-      "variable": "dst_out"
-    }
-  ],
-  "uniforms": [
-    {
-      "name": "fft",
-      "block": "FFTStage_ubo",
-      "struct": "FFTStage",
-      "binding": 0
-    }
-  ]
-},
+      gatherLayout: {"kernel":"fft_stage","inputs":[{"name":"src","kind":"buffer","elem":"vec4","sampler":"src_tex","length":"src_len","binding":1}],"outputs":[{"name":"dst","elem":"vec4","format":"","location":0,"variable":"dst_out"}],"uniforms":[{"name":"fft","block":"FFTStage_ubo","struct":"FFTStage","binding":0}]},
     },
     },
     graphs: {

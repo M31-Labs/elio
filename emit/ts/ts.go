@@ -194,25 +194,25 @@ func Emit(set KernelSet, meta Meta) (string, error) {
 				for _, e := range k.Module.Kernels {
 					es = append(es, entryJSON{Entry: e.Name, Workgroup: e.WorkgroupSize})
 				}
-				ms = append(ms, member{"entries", "Entries", "ElioEntry[]", jsonLit(es)})
+				ms = append(ms, member{"entries", "Entries", "ElioEntry[]", compactLit(es)})
 			}
 		}
 		bs, err := bindings(k.Module)
 		if err != nil {
 			return "", fmt.Errorf("ts: kernel %q: %w", k.Name, err)
 		}
-		ms = append(ms, member{"bindings", "Bindings", "ElioBinding[]", jsonLit(bs)})
+		ms = append(ms, member{"bindings", "Bindings", "ElioBinding[]", compactLit(bs)})
 		wu, su, differ, err := uniforms(k.Module)
 		if err != nil {
 			return "", fmt.Errorf("ts: kernel %q: %w", k.Name, err)
 		}
 		switch {
 		case meta.Backend == graph.WebGL2:
-			ms = append(ms, member{"uniforms", "Uniforms", "ElioUniform[]", jsonLit(su)})
+			ms = append(ms, member{"uniforms", "Uniforms", "ElioUniform[]", compactLit(su)})
 		default:
-			ms = append(ms, member{"uniforms", "Uniforms", "ElioUniform[]", jsonLit(wu)})
+			ms = append(ms, member{"uniforms", "Uniforms", "ElioUniform[]", compactLit(wu)})
 			if k.Gather && differ && wantGLSL {
-				ms = append(ms, member{"uniformsStd140", "UniformsStd140", "ElioUniform[]", jsonLit(su)})
+				ms = append(ms, member{"uniformsStd140", "UniformsStd140", "ElioUniform[]", compactLit(su)})
 			}
 		}
 		if k.Gather && wantGLSL {
@@ -226,7 +226,7 @@ func Emit(set KernelSet, meta Meta) (string, error) {
 			h.Write([]byte(glsl))
 			ms = append(ms,
 				member{"glsl", "GLSL", "", "`" + escapeTemplate(glsl) + "`"},
-				member{"gatherLayout", "GatherLayout", "ElioGatherLayout", jsonLit(gatherLayout(lay))})
+				member{"gatherLayout", "GatherLayout", "ElioGatherLayout", compactLit(gatherLayout(lay))})
 		}
 		if meta.Global != "" {
 			fmt.Fprintf(&body, "\n    // --- %s ---\n    %s: {\n", k.Name, stem)

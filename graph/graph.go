@@ -147,15 +147,35 @@ type Target struct {
 }
 
 // Binding binds a kernel binding to a resource; Level picks the mip level of
-// a texture.
+// a texture. Inside a repeat, LevelAt replaces Level with an expression of the
+// repeat's index.
 type Binding struct {
-	Name     string `json:"name"`
-	Resource string `json:"resource"`
-	Level    int    `json:"level"`
+	Name     string     `json:"name"`
+	Resource string     `json:"resource"`
+	Level    int        `json:"level"`
+	LevelAt  *IndexExpr `json:"levelAt,omitempty"`
+}
+
+// IndexExpr is a number computed from a repeat's index i, for a uniform value
+// or a binding level inside the repeat's body: i + Offset, or, when Shr is
+// set, max(Shr >> (i + Offset), 1) (the size of a mip level). A runner that
+// expands repeats evaluates these with integer arithmetic.
+type IndexExpr struct {
+	Index  string `json:"index"`
+	Offset int    `json:"offset,omitempty"`
+	Shr    int    `json:"shr,omitempty"`
+}
+
+func (x IndexExpr) eval(i int) int {
+	i += x.Offset
+	if x.Shr != 0 {
+		return max(x.Shr>>i, 1)
+	}
+	return i
 }
 
 // Uniform gives every field of a kernel's uniform struct a number or a
-// "param:<name>" reference. Fields whose names start with "_pad" may be
+// "param:<name>" reference, or, inside a repeat, an IndexExpr. Fields whose names start with "_pad" may be
 // omitted; the runner zero-fills them.
 type Uniform struct {
 	Name   string         `json:"name"`

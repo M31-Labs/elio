@@ -124,3 +124,57 @@ func TestPadFieldsMayBeOmitted(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// mipRepeatGraph builds the WebGPU mip chain of one 64x64 texture as one repeat.
+func mipRepeatGraph() graph.Graph {
+	g := graph.Graph{
+		Name: "mips", Backend: graph.WebGPU, Tier: "high", Version: 1, Params: []graph.Param{},
+		Resources:  []graph.Resource{{Name: "tex", Kind: "texture", Format: "rgba16float", Width: 64, Height: 64, MipLevels: 7}},
+		FrameSwaps: [][2]string{}, Exports: map[string]string{"tex": "tex"},
+	}
+	g.Passes = []graph.Pass{{Name: "mips", Type: "repeat", Count: 6, Index: "l", When: "always", Body: []graph.Pass{
+		{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip", When: "always",
+			Dispatch: &[3]int{16, 1, 1}, // sized for the largest level; smaller levels exit early
+			Bindings: []graph.Binding{
+				{Name: "src", Resource: "tex", LevelAt: &graph.IndexExpr{Index: "l"}},
+				{Name: "dst", Resource: "tex", LevelAt: &graph.IndexExpr{Index: "l", Offset: 1}}},
+			Uniforms: []graph.Uniform{{Name: "mip", Values: map[string]any{
+				"srcLevel": 0, "pad": 0,
+				"dstWidth":  graph.IndexExpr{Index: "l", Offset: 1, Shr: 64},
+				"dstHeight": graph.IndexExpr{Index: "l", Offset: 1, Shr: 64}}}}}}}}
+	return g
+}
+
+func TestRepeatIndexExpressions(t *testing.T) {
+	g := mipRepeatGraph()
+	flat, err := graph.Expand(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(flat.Passes) != 6 {
+		t.Fatalf("%d passes", len(flat.Passes))
+	}
+	wantW := []int{32, 16, 8, 4, 2, 1}
+	for i, p := range flat.Passes {
+		src, dst := p.Bindings[0].Level, p.Bindings[1].Level
+		v := p.Uniforms[0].Values
+		if src != i || dst != i+1 || v["dstWidth"] != wantW[i] || v["dstHeight"] != wantW[i] || p.Bindings[0].LevelAt != nil {
+			t.Errorf("pass %d: levels %d->%d, dst %v x %v", i, src, dst, v["dstWidth"], v["dstHeight"])
+		}
+	}
+	if err := graph.Validate(g, kernels(t)); err != nil {
+		t.Fatal(err)
+	}
+	// A dispatch smaller than the first level fails the coverage rule.
+	g = mipRepeatGraph()
+	g.Passes[0].Body[0].Dispatch = &[3]int{4, 1, 1}
+	if err := graph.Validate(g, kernels(t)); err == nil || !strings.Contains(err.Error(), "covers") {
+		t.Fatalf("err = %v", err)
+	}
+	// An index that is not in scope fails.
+	g = mipRepeatGraph()
+	g.Passes[0].Body[0].Bindings[0].LevelAt = &graph.IndexExpr{Index: "z"}
+	if err := graph.Validate(g, kernels(t)); err == nil || !strings.Contains(err.Error(), `index "z"`) {
+		t.Fatalf("err = %v", err)
+	}
+}

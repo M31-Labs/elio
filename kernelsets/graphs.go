@@ -154,14 +154,18 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 			b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "mipmap", Resource: tex, When: "always"})
 			return
 		}
-		for l := 1; l < mips; l++ {
-			dw := max(w>>l, 1)
-			p := graph.Pass{Name: fmt.Sprintf("%s%s.mip%d", pre, tex, l), Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip", When: "always",
-				Bindings: []graph.Binding{{Name: "src", Resource: tex, Level: l - 1}, {Name: "dst", Resource: tex, Level: l}},
-				Uniforms: []graph.Uniform{b.Uniform("ocean_mip", "mip", map[string]any{"srcLevel": 0, "dstWidth": dw, "dstHeight": dw})}}
-			p.Dispatch = b.Workgroups("ocean_mip", "ocean_mip", dw*dw)
-			b.Pass(p)
-		}
+		// One repeat over the levels: level l+1 is written from level l. The
+		// dispatch is sized for level 1; smaller levels leave the extra
+		// workgroups idle (the kernel returns past its destination size).
+		half := max(w>>1, 1)
+		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", When: "always", Body: []graph.Pass{
+			{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip", When: "always",
+				Dispatch: b.Workgroups("ocean_mip", "ocean_mip", half*half),
+				Bindings: []graph.Binding{
+					{Name: "src", Resource: tex, LevelAt: &graph.IndexExpr{Index: "l"}},
+					{Name: "dst", Resource: tex, LevelAt: &graph.IndexExpr{Index: "l", Offset: 1}}},
+				Uniforms: []graph.Uniform{b.Uniform("ocean_mip", "mip", map[string]any{"srcLevel": 0,
+					"dstWidth": graph.IndexExpr{Index: "l", Offset: 1, Shr: w}, "dstHeight": graph.IndexExpr{Index: "l", Offset: 1, Shr: w}})}}}})
 	}
 	buf := func(rname string, elem string, count, width int) { b.Buffer(rname, elem, count, width) }
 
