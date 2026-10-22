@@ -8,6 +8,7 @@ import (
 
 	"m31labs.dev/elio/emit/gather"
 	"m31labs.dev/elio/ir"
+	"m31labs.dev/elio/parse"
 )
 
 func validateES(t *testing.T, src string) {
@@ -115,6 +116,7 @@ func TestGatherESValidates(t *testing.T) {
 		{"scalebias", ir.ScaleBias(), "main", 1, 1},
 		{"mix", gatherMix(), "mix", 2, 2},
 		{"two textures", gatherTwoTextures(), "two", 1, 2},
+		{"sampled texture", gatherSampled(t), "k", 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src, lay, err := gather.Emit(tc.mod, tc.kernel)
@@ -152,4 +154,29 @@ func TestGatherESValidatorIsReal(t *testing.T) {
 			t.Errorf("%s: validator accepted a broken shader:\n%s", name, r.Output)
 		}
 	}
+}
+
+// gatherSampled reads a sampled 2D texture with textureLoad and
+// textureDimensions(t, level) and writes an RGBA16F storage texture.
+func gatherSampled(t *testing.T) *ir.Module {
+	t.Helper()
+	m, err := parse.Parse(`struct P { w: u32; }
+@group(0) @binding(0) uniform p: P;
+@group(0) @binding(1) texture src: tex2d;
+@group(0) @binding(2) storage write dst: tex2d_rgba16float;
+
+@workgroup(64) kernel k(gid: global_invocation_id) {
+  let i = gid.x;
+  let dx = i % p.w;
+  let dy = i / p.w;
+  let d = textureDimensions(src, 0u);
+  let x1 = min(dx * 2u + 1u, d.x - 1u);
+  let v = textureLoad(src, vec2u(dx * 2u, dy * 2u), 0u) + textureLoad(src, vec2u(x1, dy * 2u), 0u);
+  textureStore(dst, vec2u(i % p.w, i / p.w), v * 0.5);
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
 }

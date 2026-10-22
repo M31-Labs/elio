@@ -5,12 +5,46 @@ import (
 	"math"
 )
 
-// Texture is a 2D write-only storage texture for the interpreter. Put a
-// *Texture in Memory.Vars under the binding's name.
+// Texture is a 2D texture for the interpreter: a write-only storage texture
+// (ir.StorageTexture) or a sampled one (ir.Texture2D). Put a *Texture in
+// Memory.Vars under the binding's name.
 type Texture struct {
 	Width, Height int
 	Format        string    // as ir.StorageTexture.Format
 	Data          []float64 // Width*Height*4, row-major, RGBA; r32float uses channel 0
+
+	// Levels holds the mip levels below the texture itself, for a sampled
+	// texture: level 0 is this texture, level L > 0 is Levels[L-1]. The chain is
+	// optional and the caller fills it; the interpreter does not build or resize
+	// it, and each level carries its own Width, Height and Data. textureLoad and
+	// textureDimensions with a level the chain lacks return zeros.
+	Levels []*Texture
+}
+
+// level returns mip level l (0 is t itself), or nil if the chain lacks it.
+func (t *Texture) level(l int) *Texture {
+	if l == 0 {
+		return t
+	}
+	if l < 0 || l > len(t.Levels) {
+		return nil
+	}
+	return t.Levels[l-1]
+}
+
+// load reads texel (x, y), or zeros when it is outside the texture, as WebGPU
+// textureLoad does.
+func (t *Texture) load(x, y int) []float64 {
+	out := make([]float64, 4)
+	if x < 0 || y < 0 || x >= t.Width || y >= t.Height || len(t.Data) < t.Width*t.Height*4 {
+		return out
+	}
+	i := (y*t.Width + x) * 4
+	copy(out, t.Data[i:i+4])
+	if t.Format == "r32float" {
+		out[1], out[2], out[3] = 0, 0, 1
+	}
+	return out
 }
 
 // store writes v (up to four channels) at texel (x, y), rounding to the

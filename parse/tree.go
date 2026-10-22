@@ -114,6 +114,8 @@ func scalarType(name string) ir.Type {
 		return ir.Mat{Cols: 3, Rows: 3, Elem: ir.F32}
 	case "mat4":
 		return ir.Mat{Cols: 4, Rows: 4, Elem: ir.F32}
+	case "tex2d":
+		return ir.Texture2D{}
 	case "atomic_u32":
 		return ir.Atomic{Elem: ir.U32}
 	case "atomic_i32":
@@ -153,11 +155,15 @@ func (w *treeWalker) binding(n *gts.Node) (ir.Binding, error) {
 	g, _ := strconv.Atoi(w.Text(w.Field(n, "group")))
 	b, _ := strconv.Atoi(w.Text(w.Field(n, "binding")))
 	out := ir.Binding{Group: g, Binding: b, Name: w.Text(w.Field(n, "name"))}
-	// qualifier text is "uniform" | "storage" | "storage read" | "storage read_write"
+	// qualifier text is "uniform" | "texture" | "storage" | "storage read" | "storage read_write"
 	fields := strings.Fields(w.Text(w.Field(n, "qualifier")))
 	switch {
 	case len(fields) > 0 && fields[0] == "uniform":
 		out.Space = ir.Uniform
+	case len(fields) > 0 && fields[0] == "texture":
+		// A sampled texture: a read-only handle held in the storage space.
+		out.Space = ir.Storage
+		out.Access = ir.Read
 	case len(fields) > 0 && fields[0] == "storage":
 		out.Space = ir.Storage
 		if len(fields) > 1 {

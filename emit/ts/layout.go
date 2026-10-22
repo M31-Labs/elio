@@ -136,6 +136,8 @@ func typeString(t ir.Type) string {
 		return fmt.Sprintf("atomic<%s>", x.Elem.Name)
 	case ir.StorageTexture:
 		return "texture_storage_2d<" + x.Format + ", write>"
+	case ir.Texture2D:
+		return "texture_2d<f32>"
 	}
 	return "unknown"
 }

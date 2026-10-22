@@ -121,7 +121,18 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if len(c.Args) == 2 {
+			lv, err := ev.eval(c.Args[1])
+			if err != nil {
+				return nil, err
+			}
+			if tex = tex.level(int(toFloat(lv))); tex == nil {
+				return []float64{0, 0}, nil
+			}
+		}
 		return []float64{float64(tex.Width), float64(tex.Height)}, nil
+	case "textureLoad":
+		return ev.textureLoad(c)
 	case "min", "max":
 		a, err := ev.eval(c.Args[0])
 		if err != nil {
@@ -260,20 +271,54 @@ func (ev *evaluator) textureStore(c ir.Call) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var x, y int
+	x, y, err := texCoord("textureStore", coord)
+	if err != nil {
+		return nil, err
+	}
+	return nil, tex.store(x, y, toVec(val))
+}
+
+func texCoord(fn string, coord any) (x, y int, err error) {
 	switch cv := coord.(type) {
 	case []float64:
 		if len(cv) != 2 {
-			return nil, fmt.Errorf("run: textureStore coordinate needs 2 components, got %d", len(cv))
+			return 0, 0, fmt.Errorf("run: %s coordinate needs 2 components, got %d", fn, len(cv))
 		}
-		x, y = int(cv[0]), int(cv[1])
+		return int(cv[0]), int(cv[1]), nil
 	case []int64:
 		if len(cv) < 2 {
-			return nil, fmt.Errorf("run: textureStore coordinate needs 2 components, got %d", len(cv))
+			return 0, 0, fmt.Errorf("run: %s coordinate needs 2 components, got %d", fn, len(cv))
 		}
-		x, y = int(cv[0]), int(cv[1])
-	default:
-		return nil, fmt.Errorf("run: textureStore coordinate must be a vec2, got %T", coord)
+		return int(cv[0]), int(cv[1]), nil
 	}
-	return nil, tex.store(x, y, toVec(val))
+	return 0, 0, fmt.Errorf("run: %s coordinate must be a vec2, got %T", fn, coord)
+}
+
+// textureLoad is textureLoad(t, coord, level): one texel of a sampled texture's
+// mip level, or zeros when the texel or level does not exist.
+func (ev *evaluator) textureLoad(c ir.Call) (any, error) {
+	if len(c.Args) != 3 {
+		return nil, fmt.Errorf("run: textureLoad expects 3 arguments, got %d", len(c.Args))
+	}
+	tex, err := ev.texture(c.Args[0])
+	if err != nil {
+		return nil, err
+	}
+	coord, err := ev.eval(c.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	lv, err := ev.eval(c.Args[2])
+	if err != nil {
+		return nil, err
+	}
+	x, y, err := texCoord("textureLoad", coord)
+	if err != nil {
+		return nil, err
+	}
+	lt := tex.level(int(toFloat(lv)))
+	if lt == nil {
+		return []float64{0, 0, 0, 0}, nil
+	}
+	return lt.load(x, y), nil
 }

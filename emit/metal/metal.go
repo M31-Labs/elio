@@ -64,6 +64,11 @@ func emitKernel(b *strings.Builder, m *ir.Module, k ir.Kernel) error {
 	var args []string
 	buf, tex := 0, 0
 	for _, bnd := range m.Bindings {
+		if _, ok := bnd.Type.(ir.Texture2D); ok {
+			args = append(args, fmt.Sprintf("texture2d<float, access::read> %s [[texture(%d)]]", bnd.Name, tex))
+			tex++
+			continue
+		}
 		if _, ok := bnd.Type.(ir.StorageTexture); ok {
 			// Textures have their own index space, separate from buffers.
 			args = append(args, fmt.Sprintf("texture2d<float, access::write> %s [[texture(%d)]]", bnd.Name, tex))
@@ -319,7 +324,15 @@ func call(c ir.Call) string {
 		if len(c.Args) == 3 {
 			return fmt.Sprintf("%s.write(%s, uint2(%s))", expr(c.Args[0]), expr(c.Args[2]), expr(c.Args[1]))
 		}
+	case "textureLoad":
+		if len(c.Args) == 3 {
+			return fmt.Sprintf("%s.read(uint2(%s), %s)", expr(c.Args[0]), expr(c.Args[1]), expr(c.Args[2]))
+		}
 	case "textureDimensions":
+		if len(c.Args) == 2 {
+			t, l := expr(c.Args[0]), expr(c.Args[1])
+			return fmt.Sprintf("uint2(%s.get_width(%s), %s.get_height(%s))", t, l, t, l)
+		}
 		if len(c.Args) == 1 {
 			t := expr(c.Args[0])
 			return fmt.Sprintf("uint2(%s.get_width(), %s.get_height())", t, t)

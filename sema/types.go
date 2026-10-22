@@ -150,6 +150,8 @@ func typeName(t ir.Type) string {
 		return t.Name
 	case ir.StorageTexture:
 		return "tex2d_" + t.Format
+	case ir.Texture2D:
+		return "tex2d"
 	}
 	return "?"
 }

@@ -2,22 +2,34 @@
 // texel of the destination level (dstWidth x dstHeight). Gather-compatible: one
 // RGBA16F storage-texture output; the pass width is mip.dstWidth.
 //
-// Input: src is the previous level as a []vec4, row-major (index y * srcWidth + x),
-// srcWidth x srcHeight, the full-precision contents of the level above (for level
-// 1, the displacement or slope values; the host binds the level as a sampled
-// texture or buffer, because a write-only storage texture cannot be read).
+// Host layout (binding 0, 16 bytes): srcLevel u32, dstWidth u32, dstHeight u32,
+// pad u32 (unused).
+//
+// Input: src is a sampled rgba16float texture (texture_2d<f32>; in WebGL2 a
+// sampler2D). The kernel reads level srcLevel of it, so the host chooses how to
+// bind the chain:
+//   - bind the whole chain and pass srcLevel = L - 1 (the WebGL2 form, where a
+//     sampler cannot be a single-level view); or
+//   - bind a single-level view of level L - 1 and pass srcLevel = 0 (the WebGPU
+//     form, where the same texture's level L is the write-only dst view).
+// A sampled view and a storage view of the same level cannot both be bound in
+// one pass, which is why dst is a different level from src.
+// The source size is textureDimensions(src, srcLevel); there is no separate
+// srcWidth or srcHeight to keep in step with it.
+//
 // dst[x, y] = mean of the four source texels (2x, 2y) to (2x + 1, 2y + 1); at an
-// odd edge the second tap clamps to the last row or column, so reads stay in bounds.
+// odd edge the second tap clamps to the last row or column, so reads stay in
+// bounds. dstWidth and dstHeight are (srcSize + 1) / 2.
 
 struct OceanMipParams {
-  srcWidth: u32;
-  srcHeight: u32;
+  srcLevel: u32;
   dstWidth: u32;
   dstHeight: u32;
+  pad: u32;
 }
 
 @group(0) @binding(0) uniform mip: OceanMipParams;
-@group(0) @binding(1) storage read src: []vec4;
+@group(0) @binding(1) texture src: tex2d;
 @group(0) @binding(2) storage write dst: tex2d_rgba16float;
 
 @workgroup(64) kernel ocean_mip(gid: global_invocation_id) {
@@ -25,10 +37,11 @@ struct OceanMipParams {
   if i >= mip.dstWidth * mip.dstHeight { return; }
   let dx = i % mip.dstWidth;
   let dy = i / mip.dstWidth;
+  let size = textureDimensions(src, mip.srcLevel);
   let x0 = dx * 2u;
   let y0 = dy * 2u;
-  let x1 = min(x0 + 1u, mip.srcWidth - 1u);
-  let y1 = min(y0 + 1u, mip.srcHeight - 1u);
-  let sum = src[y0 * mip.srcWidth + x0] + src[y0 * mip.srcWidth + x1] + src[y1 * mip.srcWidth + x0] + src[y1 * mip.srcWidth + x1];
+  let x1 = min(x0 + 1u, size.x - 1u);
+  let y1 = min(y0 + 1u, size.y - 1u);
+  let sum = textureLoad(src, vec2u(x0, y0), mip.srcLevel) + textureLoad(src, vec2u(x1, y0), mip.srcLevel) + textureLoad(src, vec2u(x0, y1), mip.srcLevel) + textureLoad(src, vec2u(x1, y1), mip.srcLevel);
   textureStore(dst, vec2u(i % mip.dstWidth, i / mip.dstWidth), sum * 0.25);
 }

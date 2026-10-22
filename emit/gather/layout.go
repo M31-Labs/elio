@@ -10,12 +10,16 @@ type Layout struct {
 	Uniforms []Uniform // uniform blocks in binding order
 }
 
-// Buffer is a read-only input: a sampler2D plus a length uniform.
+// Buffer is a read-only input. A buffer (Kind "buffer") is a sampler2D of width
+// elio_width plus a length uniform. A sampled texture (Kind "texture", an
+// ir.Texture2D binding) is a sampler2D the host binds as the texture itself:
+// it is already 2D, so it has no length uniform and no elio_width linearization.
 type Buffer struct {
 	Name    string // Elio binding name
-	Elem    string // "f32", "vec2" or "vec4": how many channels carry data
-	Sampler string // sampler2D uniform name, e.g. "src_tex"
-	Length  string // uint uniform holding the element count, e.g. "src_len"
+	Kind    string // "buffer" or "texture"
+	Elem    string // "f32", "vec2" or "vec4": how many channels carry data; a texture is "vec4"
+	Sampler string // sampler2D uniform name, e.g. "src_tex"; a texture's is its binding name
+	Length  string // uint uniform holding the element count, e.g. "src_len"; empty for a texture
 	Binding int    // the Elio @binding number, for hosts that keep the WebGPU slot
 }
 

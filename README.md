@@ -175,6 +175,19 @@ not been run on a WebGL2 device.
 each store to the format's precision. A gather kernel treats a texture it
 writes at `vec2u(i % W, i / W)` as a color attachment (see below).
 
+**Sampled textures.** A read-only 2D texture (`texture_2d<f32>`, no sampler)
+binds as `@group(0) @binding(1) texture src: tex2d;`. A kernel reads it with
+`textureLoad(src, vec2u(x, y), level)` (a `vec4`; `level` is a `u32`, 0 for the
+base level) and sizes a level with `textureDimensions(src, level)`. Emitted as
+`texture_2d<f32>` and `textureLoad` (WGSL), `sampler2D` and `texelFetch`
+(GLSL 450), `texture2d<float, access::read>` and `.read` (Metal). In the
+interpreter, bind a `*run.Texture`; its optional `Levels` field holds the
+chain below the base (level `L > 0` is `Levels[L-1]`), and a load outside a
+level returns zeros, as WebGPU does. In a gather kernel a sampled texture is an
+input: a `uniform highp sampler2D <name>` read with `texelFetch`, with no
+`elio_width` linearization, and `Layout.Inputs` marks it `Kind: "texture"`
+(buffers are `Kind: "buffer"`).
+
 **FFT.** `stdlib.FFT2DCompute(n)` builds a 2D complex FFT as two compute
 kernels, `fft_rows` and `fft_cols`, that use workgroup memory (`n` from 4 to
 256, a power of two). `stdlib.FFT2DGather(n)` builds one Stockham stage,
@@ -189,7 +202,7 @@ across all outputs.
 **Ocean kernels.** `stdlib` holds six kernels for an FFT ocean: `ocean_spectrum`
 (JONSWAP spectrum for one cascade), `ocean_evolve` (advance the spectrum to a
 time), `ocean_assemble` (choppiness, displacement and slope textures),
-`ocean_mip` (box-filtered mip levels), `ocean_foam` (persistent crest foam) and
+`ocean_mip` (box-filtered mip levels, read from a sampled texture), `ocean_foam` (persistent crest foam) and
 `ocean_probe` (height and normal at up to 64 world points). Each source file
 under `stdlib/ocean/` documents its model, units and buffer layout.
 

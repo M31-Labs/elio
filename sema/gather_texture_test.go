@@ -85,3 +85,22 @@ func TestCheckGatherTextureCoordinateRules(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckGatherSampledTextureInput(t *testing.T) {
+	w := ir.Member{E: nm("p"), Field: "w"}
+	src := ir.Binding{Group: 0, Binding: 5, Space: ir.Storage, Access: ir.Read, Name: "src", Type: ir.Texture2D{}}
+	load := ir.Call{Func: "textureLoad", Args: []ir.Expr{nm("src"), ir.Call{Func: "vec2u", Args: []ir.Expr{ir.Lit{Text: "0u"}, ir.Lit{Text: "0u"}}}, ir.Lit{Text: "0u"}}}
+	dims := ir.Call{Func: "textureDimensions", Args: []ir.Expr{nm("src"), ir.Lit{Text: "0u"}}}
+	m := gtexModule([]ir.Stmt{
+		ir.Let{Name: "i", Value: gidX()},
+		ir.Let{Name: "d", Value: dims},
+		ir.Let{Name: "v", Value: load},
+		ir.Do{Expr: ir.Call{Func: "textureStore", Args: []ir.Expr{nm("a"), texCoord(nm("i"), w), nm("v")}}},
+	}, src, wTex(0, "a", "rgba16float"))
+	if errs := CheckGather(m, "k"); len(errs) != 0 {
+		t.Fatalf("sampled texture input rejected: %v", errs)
+	}
+	if errs := Check(m); len(errs) != 0 {
+		t.Fatalf("Check: %v", Errors(errs))
+	}
+}

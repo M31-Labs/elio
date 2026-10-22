@@ -80,6 +80,7 @@ type fieldJSON struct {
 
 type gatherBufferJSON struct {
 	Name    string `json:"name"`
+	Kind    string `json:"kind"`
 	Elem    string `json:"elem"`
 	Sampler string `json:"sampler"`
 	Length  string `json:"length"`
@@ -223,11 +224,11 @@ func Emit(set KernelSet, meta Meta) (string, error) {
 // carries no TypeScript syntax and a typed or untyped chunk can include it.
 const globalHeader = `
 /**
- * @typedef {{group: number, binding: number, name: string, kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture", format?: string, elementType: string}} ElioBinding
+ * @typedef {{group: number, binding: number, name: string, kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture" | "texture", format?: string, elementType: string}} ElioBinding
  * @typedef {{entry: string, workgroup: [number, number, number]}} ElioEntry
  * @typedef {{name: string, type: string, offset: number, size: number}} ElioField
  * @typedef {{group: number, binding: number, name: string, struct: string, size: number, fields: ElioField[]}} ElioUniform
- * @typedef {{kernel: string, inputs: {name: string, elem: string, sampler: string, length: string, binding: number}[], outputs: {name: string, elem: string, format: string, location: number, variable: string}[], uniforms: {name: string, block: string, struct: string, binding: number}[]}} ElioGatherLayout
+ * @typedef {{kernel: string, inputs: {name: string, kind: "buffer" | "texture", elem: string, sampler: string, length: string, binding: number}[], outputs: {name: string, elem: string, format: string, location: number, variable: string}[], uniforms: {name: string, block: string, struct: string, binding: number}[]}} ElioGatherLayout
  */
 (function () {
   "use strict";
@@ -245,7 +246,7 @@ export interface ElioBinding {
   group: number;
   binding: number;
   name: string;
-  kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture";
+  kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture" | "texture";
   format?: string;
   elementType: string;
 }
@@ -261,7 +262,7 @@ export interface ElioUniform {
 }
 export interface ElioGatherLayout {
   kernel: string;
-  inputs: { name: string; elem: string; sampler: string; length: string; binding: number }[];
+  inputs: { name: string; kind: "buffer" | "texture"; elem: string; sampler: string; length: string; binding: number }[];
   outputs: { name: string; elem: string; format: string; location: number; variable: string }[];
   uniforms: { name: string; block: string; struct: string; binding: number }[];
 }
@@ -289,6 +290,8 @@ func bindings(m *ir.Module) ([]bindingJSON, error) {
 		switch t := b.Type.(type) {
 		case ir.StorageTexture:
 			j.Kind, j.Format, j.ElementType = "storage-texture", t.Format, "vec4<f32>"
+		case ir.Texture2D:
+			j.Kind, j.ElementType = "texture", "vec4<f32>"
 		case ir.Array:
 			j.ElementType = typeString(t.Elem)
 			j.Kind = storageKind(b)
@@ -358,7 +361,7 @@ func toUniform(b ir.Binding, l StructLayout) uniformJSON {
 func gatherLayout(l gather.Layout) gatherLayoutJSON {
 	j := gatherLayoutJSON{Kernel: l.Kernel, Inputs: []gatherBufferJSON{}, Outputs: []gatherOutputJSON{}, Uniforms: []gatherUniformJSON{}}
 	for _, b := range l.Inputs {
-		j.Inputs = append(j.Inputs, gatherBufferJSON{b.Name, b.Elem, b.Sampler, b.Length, b.Binding})
+		j.Inputs = append(j.Inputs, gatherBufferJSON{b.Name, b.Kind, b.Elem, b.Sampler, b.Length, b.Binding})
 	}
 	for _, o := range l.Outputs {
 		j.Outputs = append(j.Outputs, gatherOutputJSON{o.Name, o.Elem, o.Format, o.Location, o.Variable})

@@ -3,16 +3,19 @@
 //
 // Inputs.
 //   points[i] = (x, z, unused, unused)           world metres
-//   disp0..disp3: one buffer per cascade (cascade count in probe.cascades, at
-//   most 4; unused buffers may be any buffer and are never read). Each is n * n
-//   vec4 in natural order (index z * n + x), where texel (x, z) sits at world
-//   offset (x, z) * tile / n and the tile repeats. The contents are
-//   (Dx, Dy, Dz, dDx/dz) in metres, already scaled by choppiness, i.e. the
-//   output of the evolve and inverse FFT steps with Dx, Dz and dDx/dz times
-//   the choppiness lambda. Only (Dx, Dy, Dz) are read here.
+//   disp0..disp3: the four cascades' post-FFT A buffers (cascade count in
+//   probe.cascades, at most 4; unused bindings may hold any buffer and are never
+//   read). Each is n * n vec4 in natural order (index z * n + x), where texel
+//   (x, z) sits at world offset (x, z) * tile / n and the tile repeats. The
+//   contents are what the inverse FFT leaves in buffer A after ocean_evolve,
+//   NOT scaled by choppiness: (Dy, Dx, Dz, dDy/dx) in metres (the same buffer
+//   fieldA that ocean_assemble reads; the fourth lane is unused here). This
+//   kernel applies the choppiness lambda (probe.lambda) to Dx and Dz, as
+//   ocean_foam applies it to the B buffers, so the host binds the same buffers
+//   it gives ocean_assemble and ocean_foam.
 //
 // Method. The surface point drawn at world position q came from the rest
-// position p with p + D_h(p) = q, where D_h = (Dx, Dz) summed over cascades,
+// position p with p + D_h(p) = q, where D_h = lambda (Dx, Dz) summed over cascades,
 // each sampled bilinearly. The kernel solves for p with two fixed-point steps
 // p <- q - D_h(p), then four Newton steps on F(p) = p + D_h(p) - q with the
 // Jacobian I + dD_h/dp. The Jacobian is the exact gradient of the bilinear
@@ -39,7 +42,7 @@ struct OceanProbeParams {
   size3: f32;
   t: f32;
   normalStep: f32;
-  _pad2: f32;
+  lambda: f32;
   _pad3: f32;
 }
 
@@ -140,13 +143,14 @@ struct OceanProbeParams {
         let bil = (1.0 - rz) * ((1.0 - rx) * v00 + rx * v10) + rz * ((1.0 - rx) * v01 + rx * v11);
         let gx = ((1.0 - rz) * (v10 - v00) + rz * (v11 - v01)) / cell;
         let gz = ((1.0 - rx) * (v01 - v00) + rx * (v11 - v10)) / cell;
-        sdx = sdx + bil.x;
-        sdy = sdy + bil.y;
-        sdz = sdz + bil.z;
-        gxx = gxx + gx.x;
-        gzx = gzx + gx.z;
-        gxz = gxz + gz.x;
-        gzz = gzz + gz.z;
+        // Buffer A is (Dy, Dx, Dz, dDy/dx): the horizontal lanes are y and z.
+        sdx = sdx + probe.lambda * bil.y;
+        sdy = sdy + bil.x;
+        sdz = sdz + probe.lambda * bil.z;
+        gxx = gxx + probe.lambda * gx.y;
+        gzx = gzx + probe.lambda * gx.z;
+        gxz = gxz + probe.lambda * gz.y;
+        gzz = gzz + probe.lambda * gz.z;
       }
       if it < 2u {
         px = qx - sdx;
