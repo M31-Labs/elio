@@ -82,3 +82,20 @@ func TestEmitStorageTexture(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitSampledTexture(t *testing.T) {
+	src, err := Emit(ir.TextureCopy())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		"@group(0) @binding(0) var src : texture_2d<f32>;",
+		"@group(0) @binding(1) var dst : texture_storage_2d<rgba32float, write>;",
+		"let v = textureLoad(src, vec2<i32>(c), i32(0u));",
+		"let d = textureDimensions(src, i32(1u));",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("WGSL missing %q\n--- got ---\n%s", want, src)
+		}
+	}
+}

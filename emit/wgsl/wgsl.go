@@ -65,8 +65,8 @@ func emitStruct(b *strings.Builder, s ir.Struct) {
 }
 
 func emitBinding(b *strings.Builder, bnd ir.Binding) {
-	if _, ok := bnd.Type.(ir.StorageTexture); ok {
-		// Storage textures are handles: `var`, no address space.
+	if isTexture(bnd.Type) {
+		// Textures are handles: `var`, no address space.
 		fmt.Fprintf(b, "@group(%d) @binding(%d) var %s : %s;\n", bnd.Group, bnd.Binding, bnd.Name, typeName(bnd.Type))
 		return
 	}
@@ -196,6 +196,12 @@ func expr(e ir.Expr) string {
 		if x.Func == "textureStore" && len(x.Args) == 3 {
 			return fmt.Sprintf("textureStore(%s, vec2<i32>(%s), %s)", args[0], args[1], args[2])
 		}
+		if x.Func == "textureLoad" && len(x.Args) == 3 {
+			return fmt.Sprintf("textureLoad(%s, vec2<i32>(%s), i32(%s))", args[0], args[1], args[2])
+		}
+		if x.Func == "textureDimensions" && len(x.Args) == 2 {
+			return fmt.Sprintf("textureDimensions(%s, i32(%s))", args[0], args[1])
+		}
 		fn := x.Func
 		if n, elem, ok := ir.VecConstructor(x.Func); ok {
 			fn = typeName(ir.Vec{N: n, Elem: elem}) // vec3<f32>(…)
@@ -224,6 +230,8 @@ func typeName(t ir.Type) string {
 		return x.Name
 	case ir.StorageTexture:
 		return fmt.Sprintf("texture_storage_2d<%s, write>", x.Format)
+	case ir.Texture2D:
+		return "texture_2d<f32>"
 	case ir.Array:
 		// Element type is Atomic or Named (prism can't handle it).
 		if x.Len == 0 {
@@ -232,4 +240,12 @@ func typeName(t ir.Type) string {
 		return fmt.Sprintf("array<%s, %d>", typeName(x.Elem), x.Len)
 	}
 	return "/* unknown type */"
+}
+
+func isTexture(t ir.Type) bool {
+	switch t.(type) {
+	case ir.StorageTexture, ir.Texture2D:
+		return true
+	}
+	return false
 }

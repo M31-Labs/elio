@@ -6,6 +6,8 @@
 //
 //	struct Name { field: type; … }
 //	@group(g) @binding(b) uniform|storage [read|read_write|write] name: T;
+//	@group(g) @binding(b) texture name: tex2d;   // sampled texture_2d<f32>, read with textureLoad
+//	@group(g) @binding(b) storage write name: tex2d_<format>;   // write-only storage texture
 //	@workgroup(x[,y,z]) kernel name(p: builtin, …) { stmts }
 //
 // # Expression structure: primary + postfix chain (NOT supertype left-recursion)
@@ -66,6 +68,7 @@ func ElioGrammar() *grammargen.Grammar {
 	))
 	g.Define("binding_qualifier", choice(
 		s("uniform"),
+		s("texture"),
 		seq(s("storage"), opt(choice(s("read"), s("read_write"), s("write")))),
 	))
 

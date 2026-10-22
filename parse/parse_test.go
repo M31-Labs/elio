@@ -7,6 +7,7 @@ import (
 
 	"m31labs.dev/elio/emit/wgsl"
 	"m31labs.dev/elio/ir"
+	"m31labs.dev/elio/sema"
 )
 
 // TestParseCullMatchesGolden is the front-end proof: parse cull.elio into IR,
@@ -76,5 +77,28 @@ func TestParseStorageTextureBinding(t *testing.T) {
 		if mod.Bindings[0] != want {
 			t.Errorf("%s: binding = %+v, want %+v", format, mod.Bindings[0], want)
 		}
+	}
+}
+
+func TestParseSampledTextureBinding(t *testing.T) {
+	src := "@group(0) @binding(0) texture src: tex2d;\n" +
+		"@group(0) @binding(1) storage write dst: tex2d_rgba16float;\n" +
+		"@workgroup(16) kernel main(gid: global_invocation_id) {\n" +
+		"  let v = textureLoad(src, vec2u(gid.x, 0u), 0u);\n" +
+		"  let d = textureDimensions(src, 1u);\n" +
+		"  textureStore(dst, vec2u(gid.x, 0u), v);\n}\n"
+	mod, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(mod.Bindings) != 2 {
+		t.Fatalf("got %d bindings", len(mod.Bindings))
+	}
+	want := ir.Binding{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.Read, Name: "src", Type: ir.Texture2D{}}
+	if mod.Bindings[0] != want {
+		t.Errorf("binding = %+v, want %+v", mod.Bindings[0], want)
+	}
+	if errs := sema.Check(mod); len(errs) != 0 {
+		t.Errorf("sema: %v", sema.Errors(errs))
 	}
 }

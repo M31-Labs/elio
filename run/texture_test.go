@@ -117,3 +117,86 @@ func TestTextureR32AndDimensions(t *testing.T) {
 		t.Errorf("height via textureDimensions = %v, want 2", got)
 	}
 }
+
+// mipTex builds a 4x4 rgba32float texture whose texel (x, y) is (x, y, 0, 1)
+// with a one-level mip chain: a 2x2 level whose texels hold (10+x, 10+y, 0, 1).
+func mipTex() *Texture {
+	base := newTex(4, 4, "rgba32float")
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			copy(base.texel(x, y), []float64{float64(x), float64(y), 0, 1})
+		}
+	}
+	l1 := newTex(2, 2, "rgba32float")
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			copy(l1.texel(x, y), []float64{float64(10 + x), float64(10 + y), 0, 1})
+		}
+	}
+	base.Levels = []*Texture{l1}
+	return base
+}
+
+func TestTextureLoadAndDimensionsLevels(t *testing.T) {
+	src := mipTex()
+	dst := newTex(4, 4, "rgba32float")
+	mem := &Memory{Vars: map[string]any{"src": src, "dst": dst}}
+	if err := Run(ir.TextureCopy(), "main", 16, mem); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// dst = level-0 texel + width of level 1 (2) in x.
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			got := dst.texel(x, y)
+			want := []float64{float64(x) + 2, float64(y), 0, 1}
+			for c := range want {
+				if got[c] != want[c] {
+					t.Fatalf("dst(%d,%d) = %v, want %v", x, y, got, want)
+				}
+			}
+		}
+	}
+}
+
+func loadModule(level, x, y string) *ir.Module {
+	return &ir.Module{
+		Bindings: []ir.Binding{
+			{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.Read, Name: "src", Type: ir.Texture2D{}},
+			{Group: 0, Binding: 1, Space: ir.Storage, Access: ir.Write, Name: "dst", Type: ir.StorageTexture{Format: "rgba32float"}},
+		},
+		Kernels: []ir.Kernel{{Name: "main", WorkgroupSize: [3]int{1, 1, 1}, Body: []ir.Stmt{
+			ir.Do{Expr: ir.Call{Func: "textureStore", Args: []ir.Expr{
+				ir.Name{Name: "dst"}, ir.Call{Func: "vec2u", Args: []ir.Expr{ir.Lit{Text: "0u"}, ir.Lit{Text: "0u"}}},
+				ir.Call{Func: "textureLoad", Args: []ir.Expr{ir.Name{Name: "src"},
+					ir.Call{Func: "vec2u", Args: []ir.Expr{ir.Lit{Text: x}, ir.Lit{Text: y}}}, ir.Lit{Text: level}}},
+			}}},
+		}}},
+	}
+}
+
+func TestTextureLoadLevelsAndBounds(t *testing.T) {
+	cases := []struct {
+		name        string
+		level, x, y string
+		want        []float64
+	}{
+		{"level0", "0u", "3u", "2u", []float64{3, 2, 0, 1}},
+		{"level1", "1u", "1u", "0u", []float64{11, 10, 0, 1}},
+		{"x out of range", "0u", "4u", "0u", []float64{0, 0, 0, 0}},
+		{"level1 out of range", "1u", "2u", "0u", []float64{0, 0, 0, 0}},
+		{"missing level", "2u", "0u", "0u", []float64{0, 0, 0, 0}},
+	}
+	for _, tc := range cases {
+		dst := newTex(1, 1, "rgba32float")
+		mem := &Memory{Vars: map[string]any{"src": mipTex(), "dst": dst}}
+		if err := Run(loadModule(tc.level, tc.x, tc.y), "main", 1, mem); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		for c := range tc.want {
+			if dst.Data[c] != tc.want[c] {
+				t.Errorf("%s: got %v, want %v", tc.name, dst.Data[:4], tc.want)
+				break
+			}
+		}
+	}
+}

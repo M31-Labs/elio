@@ -43,6 +43,12 @@ type Named struct{ Name string }
 // Format is "rgba16float", "rgba32float" or "r32float".
 type StorageTexture struct{ Format string }
 
+// Texture2D is a 2D sampled texture read without a sampler: texture_2d<f32> in
+// WGSL. A binding of this type uses Space Storage and Access Read. Only
+// textureLoad(t, coord, level) and textureDimensions(t, level) may touch it. Its
+// texel format is the host's choice; every load returns a vec4<f32>.
+type Texture2D struct{}
+
 func (Scalar) isType()         {}
 func (Vec) isType()            {}
 func (Mat) isType()            {}
@@ -50,6 +56,7 @@ func (Array) isType()          {}
 func (Atomic) isType()         {}
 func (Named) isType()          {}
 func (StorageTexture) isType() {}
+func (Texture2D) isType()      {}
 
 // Canonical scalars.
 var (

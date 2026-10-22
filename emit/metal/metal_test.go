@@ -73,3 +73,20 @@ func TestEmitStorageTexture(t *testing.T) {
 		t.Errorf("textureDimensions not lowered:\n%s", src)
 	}
 }
+
+func TestEmitSampledTexture(t *testing.T) {
+	src, err := Emit(ir.TextureCopy())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		"texture2d<float, access::read> src [[texture(0)]]",
+		"texture2d<float, access::write> dst [[texture(1)]]",
+		"src.read(uint2(c), 0u)",
+		"uint2(src.get_width(1u), src.get_height(1u))",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("MSL missing %q\n--- got ---\n%s", want, src)
+		}
+	}
+}

@@ -96,3 +96,25 @@ func TestEmitStorageTexture(t *testing.T) {
 		t.Errorf("textureDimensions not lowered:\n%s", src)
 	}
 }
+
+func TestEmitSampledTexture(t *testing.T) {
+	src, err := Emit(ir.TextureCopy())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		"layout(binding = 0) uniform sampler2D src;",
+		"vec4 v = texelFetch(src, ivec2(c), int(0u));",
+		"uvec2 d = uvec2(textureSize(src, int(1u)));",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("GLSL missing %q\n--- got ---\n%s", want, src)
+		}
+	}
+	m := ir.TextureCopy()
+	m.Kernels[0].Body = append(m.Kernels[0].Body, ir.Let{Name: "d0", Value: ir.Call{Func: "textureDimensions", Args: []ir.Expr{ir.Name{Name: "src"}}}})
+	src, _ = Emit(m)
+	if !strings.Contains(src, "uvec2 d0 = uvec2(textureSize(src, 0));") {
+		t.Errorf("one-argument textureDimensions on a sampled texture not lowered:\n%s", src)
+	}
+}

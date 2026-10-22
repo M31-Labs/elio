@@ -186,3 +186,34 @@ func TextureFill(format string) *Module {
 		}},
 	}
 }
+
+// TextureCopy returns a kernel that reads the 4x4 sampled texture `src` (group 0,
+// binding 0) at level 1 and level 0 and writes (level 0 texel + width of level 1)
+// into the write-only storage texture `dst` (group 0, binding 1, rgba32float),
+// one invocation per texel of a 4x4 grid (workgroup 16). It exercises
+// textureLoad and textureDimensions(t, level) on every backend.
+func TextureCopy() *Module {
+	return &Module{
+		Bindings: []Binding{
+			{Group: 0, Binding: 0, Space: Storage, Access: Read, Name: "src", Type: Texture2D{}},
+			{Group: 0, Binding: 1, Space: Storage, Access: Write, Name: "dst", Type: StorageTexture{Format: "rgba32float"}},
+		},
+		Kernels: []Kernel{{
+			Name:          "main",
+			WorkgroupSize: [3]int{16, 1, 1},
+			Builtins:      []Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: Vec{3, U32}}},
+			Body: []Stmt{
+				Let{Name: "x", Value: Binary{"%", Member{Name{"gid"}, "x"}, Lit{"4u"}}},
+				Let{Name: "y", Value: Binary{"/", Member{Name{"gid"}, "x"}, Lit{"4u"}}},
+				Let{Name: "c", Value: Call{"vec2u", []Expr{Name{"x"}, Name{"y"}}}},
+				Let{Name: "d", Value: Call{"textureDimensions", []Expr{Name{"src"}, Lit{"1u"}}}},
+				Let{Name: "v", Value: Call{"textureLoad", []Expr{Name{"src"}, Name{"c"}, Lit{"0u"}}}},
+				Do{Expr: Call{"textureStore", []Expr{
+					Name{"dst"},
+					Name{"c"},
+					Binary{"+", Name{"v"}, Call{"vec4", []Expr{Call{"f32", []Expr{Member{Name{"d"}, "x"}}}, Lit{"0.0"}, Lit{"0.0"}, Lit{"0.0"}}}},
+				}}},
+			},
+		}},
+	}
+}
