@@ -177,15 +177,15 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 	// Mips: WebGPU downsamples level by level; WebGL2 calls generateMipmap.
 	mipChain := func(pre, tex string, w, mips int) {
 		if !gpu {
-			b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "mipmap", Resource: tex, When: "always"})
+			b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "mipmap", Resource: tex})
 			return
 		}
 		// One repeat over the levels: level l+1 is written from level l. The
 		// dispatch is sized for level 1; smaller levels leave the extra
 		// workgroups idle (the kernel returns past its destination size).
 		half := max(w>>1, 1)
-		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", When: "always", Body: []graph.Pass{
-			{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip", When: "always",
+		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", Body: []graph.Pass{
+			{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip",
 				Dispatch: b.Workgroups("ocean_mip", "ocean_mip", half*half),
 				Bindings: []graph.Binding{
 					{Name: "src", Resource: tex, LevelAt: &graph.IndexExpr{Index: "l"}},
@@ -222,7 +222,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		b.Pass(place(sp, "ocean_spectrum", nc, nc))
 
 		// Evolve to the phase time.
-		ev := graph.Pass{Name: pre + "evolve", Type: "kernel", Kernel: "ocean_evolve", Entry: "ocean_evolve", When: "always",
+		ev := graph.Pass{Name: pre + "evolve", Type: "kernel", Kernel: "ocean_evolve", Entry: "ocean_evolve",
 			Bindings: []graph.Binding{{Name: "h0", Resource: name("h0_", c)}, {Name: "omega", Resource: name("omega_", c)},
 				{Name: "outA", Resource: name("fftA_", c)}, {Name: "outB", Resource: name("fftB_", c)}},
 			Uniforms: []graph.Uniform{b.Uniform("ocean_evolve", "ev", map[string]any{
@@ -235,7 +235,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		if gpu {
 			for _, x := range []string{"A", "B"} {
 				for _, entry := range []string{"fft_rows", "fft_cols"} {
-					b.Pass(graph.Pass{Name: pre + "fft" + x + "." + entry, Type: "kernel", Kernel: fk, Entry: entry, When: "always",
+					b.Pass(graph.Pass{Name: pre + "fft" + x + "." + entry, Type: "kernel", Kernel: fk, Entry: entry,
 						Dispatch: &[3]int{nc, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: name("fft"+x+"_", c)}}})
 				}
 			}
@@ -246,17 +246,17 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 			for axis, label := range []string{"rows", "cols"} {
 				var body []graph.Pass
 				for _, x := range []string{"A", "B"} {
-					body = append(body, place(graph.Pass{Name: x, Type: "kernel", Kernel: gk, Entry: "fft_stage", When: "always",
+					body = append(body, place(graph.Pass{Name: x, Type: "kernel", Kernel: gk, Entry: "fft_stage",
 						Bindings: []graph.Binding{{Name: "src", Resource: name("fft"+x+"_", c)}, {Name: "dst", Resource: name("fft"+x+"2_", c)}},
 						Uniforms: []graph.Uniform{b.Uniform(gk, "fft", map[string]any{"n": nc, "stage": ref("s"), "axis": axis})}}, gk, nc, nc))
 				}
-				b.Pass(graph.Pass{Name: pre + "fft." + label, Type: "repeat", Count: bitsLen(nc), Index: "s", When: "always",
+				b.Pass(graph.Pass{Name: pre + "fft." + label, Type: "repeat", Count: bitsLen(nc), Index: "s",
 					Swap: [][2]string{{name("fftA_", c), name("fftA2_", c)}, {name("fftB_", c), name("fftB2_", c)}}, Body: body})
 			}
 		}
 
 		// Assemble into the cascade textures, then mips.
-		as := graph.Pass{Name: pre + "assemble", Type: "kernel", Kernel: "ocean_assemble", Entry: "ocean_assemble", When: "always",
+		as := graph.Pass{Name: pre + "assemble", Type: "kernel", Kernel: "ocean_assemble", Entry: "ocean_assemble",
 			Bindings: []graph.Binding{{Name: "fieldA", Resource: name("fftA_", c)}, {Name: "fieldB", Resource: name("fftB_", c)},
 				{Name: "disp", Resource: name("dispTex", c)}, {Name: "slope", Resource: name("slopeTex", c)}},
 			Uniforms: []graph.Uniform{b.Uniform("ocean_assemble", "assem", map[string]any{"n": nc, "lambda": ref("lambda")})}}
@@ -294,7 +294,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		probeBind = append(probeBind, graph.Binding{Name: fmt.Sprintf("disp%d", i), Resource: name("fftA_", c)})
 	}
 	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"})
-	b.Pass(place(graph.Pass{Name: "foam", Type: "kernel", Kernel: "ocean_foam", Entry: "ocean_foam", When: "always",
+	b.Pass(place(graph.Pass{Name: "foam", Type: "kernel", Kernel: "ocean_foam", Entry: "ocean_foam",
 		Bindings: foamBind, Uniforms: []graph.Uniform{b.Uniform("ocean_foam", "foam", fu)}}, "ocean_foam", foamWidth, foamWidth))
 	mipChain("", "foamTex", foamWidth, foamMips)
 	b.Swap("foamA", "foamB").Export("foam", "foamTex")
@@ -312,7 +312,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		}
 		bind := append([]graph.Binding{{Name: "points", Resource: "probePoints"}}, probeBind...)
 		bind = append(bind, graph.Binding{Name: "out", Resource: "probeOut"})
-		b.Pass(graph.Pass{Name: "probe", Type: "kernel", Kernel: "ocean_probe", Entry: "ocean_probe", When: "always",
+		b.Pass(graph.Pass{Name: "probe", Type: "kernel", Kernel: "ocean_probe", Entry: "ocean_probe",
 			Dispatch: b.Workgroups("ocean_probe", "ocean_probe", probeMax), Bindings: bind,
 			Uniforms: []graph.Uniform{b.Uniform("ocean_probe", "probe", pu)}})
 		b.Export("probe", "probeOut")

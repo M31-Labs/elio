@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -176,5 +177,32 @@ func TestRepeatIndexExpressions(t *testing.T) {
 	g.Passes[0].Body[0].Bindings[0].LevelAt = &graph.IndexExpr{Index: "z"}
 	if err := graph.Validate(g, kernels(t)); err == nil || !strings.Contains(err.Error(), `index "z"`) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// An empty when means "always" and a zero level is omitted, which keeps the
+// emitted JSON short.
+func TestDefaultsAreOmittedFromJSON(t *testing.T) {
+	g := validGraph()
+	for i := range g.Passes {
+		g.Passes[i].When = ""
+		for j := range g.Passes[i].Bindings {
+			g.Passes[i].Bindings[j].Level = 0
+		}
+	}
+	g.Passes[3].Bindings[1].Level = 1
+	if err := graph.Validate(g, kernels(t)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(g.Passes[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"when"`) || strings.Contains(string(b), `"level"`) {
+		t.Errorf("defaults in JSON: %s", b)
+	}
+	flat, _ := graph.Expand(mipRepeatGraph())
+	if len(flat.Passes) == 0 {
+		t.Fatal("no passes")
 	}
 }

@@ -126,10 +126,10 @@ type Pass struct {
 	Type   string `json:"type"` // "kernel", "mipmap" or "repeat"
 	Kernel string `json:"kernel,omitempty"`
 	Entry  string `json:"entry,omitempty"`
-	// When is "always", "param:<boolParam>" or "changed:<p1>,<p2>,...": the
+	// When is "always" (or empty, which is omitted from JSON), "param:<boolParam>" or "changed:<p1>,<p2>,...": the
 	// pass runs on the first frame and on any frame when one of those params
 	// changed (a tween counts).
-	When     string    `json:"when"`
+	When     string    `json:"when,omitempty"`
 	Dispatch *[3]int   `json:"dispatch,omitempty"` // WebGPU workgroup counts
 	Target   *Target   `json:"target,omitempty"`   // WebGL2 render size
 	Bindings []Binding `json:"bindings,omitempty"`
@@ -155,7 +155,7 @@ type Target struct {
 type Binding struct {
 	Name     string     `json:"name"`
 	Resource string     `json:"resource"`
-	Level    int        `json:"level"`
+	Level    int        `json:"level,omitempty"` // 0 when omitted
 	LevelAt  *IndexExpr `json:"levelAt,omitempty"`
 }
 
