@@ -155,7 +155,17 @@ func initShared(decls []ir.Shared) map[string]any {
 	shared := map[string]any{}
 	for _, sh := range decls {
 		if arr, ok := sh.Type.(ir.Array); ok && arr.Len > 0 {
-			shared[sh.Name] = make([]float64, arr.Len)
+			if v, isVec := arr.Elem.(ir.Vec); isVec {
+				// Vector elements are whole []float64 values, so the array holds
+				// one zeroed vector per slot.
+				cells := make([]any, arr.Len)
+				for i := range cells {
+					cells[i] = make([]float64, v.N)
+				}
+				shared[sh.Name] = cells
+			} else {
+				shared[sh.Name] = make([]float64, arr.Len)
+			}
 		} else {
 			shared[sh.Name] = float64(0)
 		}
