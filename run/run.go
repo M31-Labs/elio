@@ -45,9 +45,25 @@ const (
 	flowReturn
 )
 
-// Run executes kernel kernelName over global invocations [0,count) against mem.
-// Invocations run sequentially; atomics are therefore exact.
+// Options selects how the interpreter evaluates a kernel.
+type Options struct {
+	// Float32 rounds every float arithmetic result, math builtin result, f32
+	// conversion, float literal and stored scalar to float32
+	// (float64(float32(x))), so the run reproduces a GPU's f32 arithmetic up to
+	// the accuracy of its math functions. Integer values are untouched. Vector
+	// values are rounded where they are produced (arithmetic, builtins), so a
+	// u32 vector that exceeds 2^24 is not a supported input in this mode.
+	Float32 bool
+}
+
+// Run executes kernel kernelName over global invocations [0,count) against mem
+// in float64. Invocations run sequentially; atomics are therefore exact.
 func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
+	return RunWith(m, kernelName, count, mem, Options{})
+}
+
+// RunWith is Run with explicit Options.
+func RunWith(m *ir.Module, kernelName string, count int, mem *Memory, opts Options) error {
 	var k *ir.Kernel
 	for i := range m.Kernels {
 		if m.Kernels[i].Name == kernelName {
@@ -58,7 +74,7 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 	if k == nil {
 		return fmt.Errorf("run: kernel %q not found", kernelName)
 	}
-	consts, err := evalConsts(m, mem)
+	consts, err := evalConsts(m, mem, opts)
 	if err != nil {
 		return err
 	}
@@ -73,7 +89,7 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 	// reductions and scans, not just maps.
 	if len(k.Shared) == 0 {
 		for gid := 0; gid < count; gid++ {
-			ev := &evaluator{mem: mem, locals: map[string]any{}, consts: consts}
+			ev := &evaluator{mem: mem, locals: map[string]any{}, consts: consts, f32: opts.Float32}
 			setBuiltins(ev, k, gid, total)
 			if _, err := ev.execBlock(k.Body); err != nil {
 				return fmt.Errorf("run: invocation %d: %w", gid, err)
@@ -95,7 +111,7 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 			go func(l int) {
 				defer wgrp.Done()
 				gid := wg*total + l
-				ev := &evaluator{mem: mem, locals: map[string]any{}, shared: shared, consts: consts, barrier: bar}
+				ev := &evaluator{mem: mem, locals: map[string]any{}, shared: shared, consts: consts, barrier: bar, f32: opts.Float32}
 				setBuiltins(ev, k, gid, total)
 				_, errs[l] = ev.execBlock(k.Body)
 			}(l)
@@ -112,9 +128,9 @@ func Run(m *ir.Module, kernelName string, count int, mem *Memory) error {
 
 // evalConsts evaluates the module's constants once, in order, so each may
 // reference earlier ones. The result is shared read-only by every invocation.
-func evalConsts(m *ir.Module, mem *Memory) (map[string]any, error) {
+func evalConsts(m *ir.Module, mem *Memory, opts Options) (map[string]any, error) {
 	consts := map[string]any{}
-	cev := &evaluator{mem: mem, locals: map[string]any{}, consts: consts}
+	cev := &evaluator{mem: mem, locals: map[string]any{}, consts: consts, f32: opts.Float32}
 	for _, cn := range m.Consts {
 		v, err := cev.eval(cn.Value)
 		if err != nil {
@@ -213,6 +229,25 @@ type evaluator struct {
 	shared  map[string]any // workgroup-shared store (nil for non-shared kernels)
 	consts  map[string]any // module-level constants (shared, read-only)
 	barrier *barrier       // workgroup barrier (nil for non-shared kernels)
+	f32     bool           // round float results to float32 (Options.Float32)
+}
+
+// round rounds a float result (a float64, or each component of a fresh
+// []float64) to float32 in Float32 mode. Integers and bools pass through.
+func (ev *evaluator) round(v any) any {
+	if !ev.f32 {
+		return v
+	}
+	switch x := v.(type) {
+	case float64:
+		return float64(float32(x))
+	case []float64:
+		for i, c := range x {
+			x[i] = float64(float32(c))
+		}
+		return x
+	}
+	return v
 }
 
 func (ev *evaluator) lookup(name string) (any, bool) {
