@@ -4,6 +4,7 @@
 //	elio emit <wgsl|glsl|metal> <file.elio>   # emit shader source to stdout
 //	elio emit ts --set ocean                  # TypeScript module of the ocean kernels
 //	elio emit ts --set ocean --global NAME    # the same as a classic script assigning window.NAME
+//	elio emit ts --set ocean --backend webgpu # only the WebGPU shaders and graphs (or webgl2)
 //	elio check <file.elio>                    # parse-check; prints "ok" or errors
 package main
 
@@ -25,27 +26,43 @@ import (
 // version names this Elio build in generated headers.
 const version = "v0.4.3+ocean"
 
+const emitTSUsage = "usage: elio emit ts --set ocean [--global NAME] [--backend webgpu|webgl2]"
+
 func runEmitTS(args []string, stdout, stderr io.Writer) int {
-	global := ""
-	if len(args) == 4 && args[2] == "--global" {
-		global, args = args[3], args[:2]
+	var set, global, backend string
+	for i := 0; i < len(args); i += 2 {
+		if i+1 >= len(args) {
+			fmt.Fprintln(stderr, emitTSUsage)
+			return 2
+		}
+		switch args[i] {
+		case "--set":
+			set = args[i+1]
+		case "--global":
+			global = args[i+1]
+		case "--backend":
+			backend = args[i+1]
+		default:
+			fmt.Fprintln(stderr, emitTSUsage)
+			return 2
+		}
 	}
-	if len(args) != 2 || args[0] != "--set" {
-		fmt.Fprintln(stderr, "usage: elio emit ts --set ocean [--global NAME]")
+	if set == "" {
+		fmt.Fprintln(stderr, emitTSUsage)
 		return 2
 	}
-	var set ts.KernelSet
+	var ks ts.KernelSet
 	var err error
-	switch args[1] {
+	switch set {
 	case "ocean":
-		set, err = kernelsets.OceanWithGraphs()
+		ks, err = kernelsets.OceanWithGraphs()
 	default:
-		fmt.Fprintf(stderr, "elio: unknown kernel set %q (want ocean)\n", args[1])
+		fmt.Fprintf(stderr, "elio: unknown kernel set %q (want ocean)\n", set)
 		return 2
 	}
 	if err == nil {
 		var out string
-		if out, err = ts.Emit(set, ts.Meta{Version: version, Global: global}); err == nil {
+		if out, err = ts.Emit(ks, ts.Meta{Version: version, Global: global, Backend: backend}); err == nil {
 			fmt.Fprint(stdout, out)
 			return 0
 		}
@@ -56,8 +73,10 @@ func runEmitTS(args []string, stdout, stderr io.Writer) int {
 
 const usage = `usage:
   elio emit <wgsl|glsl|metal> <file.elio>   emit shader source to stdout
-  elio emit ts --set ocean [--global NAME]  emit a TypeScript module of a kernel set
-                                            (--global: a classic script that assigns window.NAME)
+  elio emit ts --set ocean [--global NAME] [--backend webgpu|webgl2]
+                                            emit a TypeScript module of a kernel set
+                                            (--global: a classic script that assigns window.NAME;
+                                            --backend: only that backend's shaders and graphs)
   elio check <file.elio>                    parse + semantic-check the source
   elio graph [--format json|dot] <file.elio>
   elio kernels [--target wgsl|glsl|metal] [--out dir] [--validate] <file.elio>

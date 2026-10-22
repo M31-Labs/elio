@@ -1,6 +1,7 @@
 package kernelsets
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -57,8 +58,19 @@ func TestOceanGraphPassCounts(t *testing.T) {
 		"webgl2/low":    3 + 3 + 3*24 + 3 + 6 + 1 + 1,
 	}
 	for key, n := range want {
-		if got := len(gs[key].Passes); got != n {
-			t.Errorf("%s: %d passes, want %d", key, got, n)
+		flat, err := graph.Expand(gs[key])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := len(flat.Passes); got != n {
+			t.Errorf("%s: %d expanded passes, want %d", key, got, n)
+		}
+	}
+	// FFT stages (WebGL2) and mip levels (WebGPU) are repeats, so no graph
+	// lists more than 45 passes.
+	for _, key := range graphKeys {
+		if top := len(gs[key].Passes); top > 45 {
+			t.Errorf("%s: %d top-level passes; stages and mip levels should be repeats", key, top)
 		}
 	}
 }
@@ -136,5 +148,43 @@ func TestOceanWithGraphsOrder(t *testing.T) {
 	}
 	if len(set.Graphs) != len(graphKeys) {
 		t.Errorf("%d graphs", len(set.Graphs))
+	}
+}
+
+// The surface samples cascade c at (xz - water) / size, so the graph exports
+// the water offset wrapped to each cascade's tile: wrapping in f64 keeps the
+// f32 sample position precise on long voyages.
+func TestOceanGraphWaterWrap(t *testing.T) {
+	gs, _ := loadGraphs(t)
+	sizes := []float64{1600, 250, 37, 5.3}
+	for _, key := range graphKeys {
+		g := gs[key]
+		cascades := 4
+		if g.Tier == "low" {
+			cascades = 3
+		}
+		params := map[string]graph.Param{}
+		for _, p := range g.Params {
+			params[p.Name] = p
+		}
+		var want []string
+		for c := 0; c < cascades; c++ {
+			for _, ax := range []string{"X", "Z"} {
+				name := fmt.Sprintf("waterMod%s%d", ax, c)
+				want = append(want, name)
+				p, ok := params[name]
+				if !ok {
+					t.Errorf("%s: no param %s", key, name)
+					continue
+				}
+				s := p.Source
+				if s.Kind != graph.SourceExpr || s.Op != "mod" || len(s.Args) != 2 || s.Args[0] != "param:water"+ax || s.Args[1] != sizes[c] {
+					t.Errorf("%s: %s source %+v", key, name, s)
+				}
+			}
+		}
+		if strings.Join(g.ExportParams, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: exportParams %v, want %v", key, g.ExportParams, want)
+		}
 	}
 }

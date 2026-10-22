@@ -21,12 +21,15 @@ func kernels(t *testing.T) []graph.Kernel {
 	must(t, err)
 	fc, err := stdlib.FFT2DCompute(64)
 	must(t, err)
+	fg, err := stdlib.FFT2DGather(64)
+	must(t, err)
 	ks = append(ks,
 		graph.Kernel{Name: "ocean_evolve", Entry: "ocean_evolve", Module: ev, Gather: true},
 		graph.Kernel{Name: "ocean_assemble", Entry: "ocean_assemble", Module: as, Gather: true},
 		graph.Kernel{Name: "ocean_mip", Entry: "ocean_mip", Module: mp, Gather: true},
 		graph.Kernel{Name: "ocean_spectrum", Entry: "ocean_spectrum", Module: sp},
 		graph.Kernel{Name: "fft_compute_64", Entry: "fft_rows", Module: fc},
+		graph.Kernel{Name: "fft_gather_64", Entry: "fft_stage", Module: fg, Gather: true},
 	)
 	return ks
 }
@@ -84,6 +87,14 @@ func validGraph() graph.Graph {
 	}
 }
 
+func TestExportParamsAccepted(t *testing.T) {
+	g := validGraph()
+	g.ExportParams = []string{"t", "lambda"}
+	if err := graph.Validate(g, kernels(t)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidGraphPasses(t *testing.T) {
 	if err := graph.Validate(validGraph(), kernels(t)); err != nil {
 		t.Fatal(err)
@@ -126,6 +137,11 @@ func TestValidateRejects(t *testing.T) {
 		{"export unknown", func(g *graph.Graph) { g.Exports["x"] = "ghost" }, "export"},
 		{"export a buffer on webgl2", func(g *graph.Graph) { g.Backend = graph.WebGL2; g.Exports["x"] = "A" }, "must be a texture"},
 		{"swap size mismatch", func(g *graph.Graph) { g.FrameSwaps = [][2]string{{"A", "omega"}} }, "swap"},
+		{"export param unknown", func(g *graph.Graph) { g.ExportParams = []string{"ghost"} }, `exportParams: "ghost"`},
+		{"export param is a buffer", func(g *graph.Graph) {
+			g.Params = append(g.Params, graph.Param{Name: "pts", Type: "vec4<f32>[]", Count: 4, Source: graph.Source{Kind: graph.SourceValue}})
+			g.ExportParams = []string{"pts"}
+		}, `exportParams: "pts"`},
 		{"duplicate pass name", func(g *graph.Graph) { g.Passes[1].Name = "evolve" }, "duplicate"},
 		{"unknown kernel", func(g *graph.Graph) { g.Passes[0].Kernel = "ghost" }, "unknown kernel"},
 	}

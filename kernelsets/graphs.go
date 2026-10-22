@@ -123,6 +123,16 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 	b.Accumulate("simTime", "timeScale")
 	b.Expr("phaseTime", graph.F32, "mod", ref("simTime"), ref("loopPeriod"))
 	b.Accumulate("waterX", "driftX").Accumulate("waterZ", "driftZ")
+	// The surface samples cascade c at (xz - water) / size. The water offset
+	// grows without bound, so the runner wraps it to each cascade's tile in
+	// f64 and the surface binds the wrapped values.
+	for c := 0; c < cascades; c++ {
+		for _, ax := range []string{"X", "Z"} {
+			n := fmt.Sprintf("waterMod%s%d", ax, c)
+			b.Expr(n, graph.F32, "mod", ref("water"+ax), oceanCascades[c].size)
+			b.ExportParams(n)
+		}
+	}
 	for _, ax := range []string{"X", "Z"} {
 		b.Expr("foamRel"+ax, graph.F32, "sub", ref("camera"+ax), ref("water"+ax))
 		b.Expr("foamTexel"+ax, graph.F32, "div", ref("foamRel"+ax), foamCell)
@@ -154,14 +164,18 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 			b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "mipmap", Resource: tex, When: "always"})
 			return
 		}
-		for l := 1; l < mips; l++ {
-			dw := max(w>>l, 1)
-			p := graph.Pass{Name: fmt.Sprintf("%s%s.mip%d", pre, tex, l), Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip", When: "always",
-				Bindings: []graph.Binding{{Name: "src", Resource: tex, Level: l - 1}, {Name: "dst", Resource: tex, Level: l}},
-				Uniforms: []graph.Uniform{b.Uniform("ocean_mip", "mip", map[string]any{"srcLevel": 0, "dstWidth": dw, "dstHeight": dw})}}
-			p.Dispatch = b.Workgroups("ocean_mip", "ocean_mip", dw*dw)
-			b.Pass(p)
-		}
+		// One repeat over the levels: level l+1 is written from level l. The
+		// dispatch is sized for level 1; smaller levels leave the extra
+		// workgroups idle (the kernel returns past its destination size).
+		half := max(w>>1, 1)
+		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", When: "always", Body: []graph.Pass{
+			{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip", When: "always",
+				Dispatch: b.Workgroups("ocean_mip", "ocean_mip", half*half),
+				Bindings: []graph.Binding{
+					{Name: "src", Resource: tex, LevelAt: &graph.IndexExpr{Index: "l"}},
+					{Name: "dst", Resource: tex, LevelAt: &graph.IndexExpr{Index: "l", Offset: 1}}},
+				Uniforms: []graph.Uniform{b.Uniform("ocean_mip", "mip", map[string]any{"srcLevel": 0,
+					"dstWidth": graph.IndexExpr{Index: "l", Offset: 1, Shr: w}, "dstHeight": graph.IndexExpr{Index: "l", Offset: 1, Shr: w}})}}}})
 	}
 	buf := func(rname string, elem string, count, width int) { b.Buffer(rname, elem, count, width) }
 
@@ -202,28 +216,26 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		// Inverse FFT of A and B.
 		fk := fmt.Sprintf("fft_compute_%d", nc)
 		gk := fmt.Sprintf("fft_gather_%d", nc)
-		for _, x := range []string{"A", "B"} {
-			main := name("fft"+x+"_", c)
-			if gpu {
+		if gpu {
+			for _, x := range []string{"A", "B"} {
 				for _, entry := range []string{"fft_rows", "fft_cols"} {
 					b.Pass(graph.Pass{Name: pre + "fft" + x + "." + entry, Type: "kernel", Kernel: fk, Entry: entry, When: "always",
-						Dispatch: &[3]int{nc, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: main}}})
+						Dispatch: &[3]int{nc, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: name("fft"+x+"_", c)}}})
 				}
-				continue
 			}
-			scratch := name("fft"+x+"2_", c)
-			stages := 0
-			for axis := 0; axis < 2; axis++ {
-				for s := 0; s < bitsLen(nc); s++ {
-					src, dst := main, scratch
-					if stages%2 == 1 {
-						src, dst = scratch, main
-					}
-					stages++
-					b.Pass(place(graph.Pass{Name: fmt.Sprintf("%sfft%s.axis%ds%d", pre, x, axis, s), Type: "kernel", Kernel: gk, Entry: "fft_stage", When: "always",
-						Bindings: []graph.Binding{{Name: "src", Resource: src}, {Name: "dst", Resource: dst}},
-						Uniforms: []graph.Uniform{b.Uniform(gk, "fft", map[string]any{"n": nc, "stage": s, "axis": axis})}}, gk, nc, nc))
+		} else {
+			// One stage per pass, rows then columns, A and B together; the
+			// buffers alternate with their scratch twins, which the repeat's
+			// swap expresses.
+			for axis, label := range []string{"rows", "cols"} {
+				var body []graph.Pass
+				for _, x := range []string{"A", "B"} {
+					body = append(body, place(graph.Pass{Name: x, Type: "kernel", Kernel: gk, Entry: "fft_stage", When: "always",
+						Bindings: []graph.Binding{{Name: "src", Resource: name("fft"+x+"_", c)}, {Name: "dst", Resource: name("fft"+x+"2_", c)}},
+						Uniforms: []graph.Uniform{b.Uniform(gk, "fft", map[string]any{"n": nc, "stage": ref("s"), "axis": axis})}}, gk, nc, nc))
 				}
+				b.Pass(graph.Pass{Name: pre + "fft." + label, Type: "repeat", Count: bitsLen(nc), Index: "s", When: "always",
+					Swap: [][2]string{{name("fftA_", c), name("fftA2_", c)}, {name("fftB_", c), name("fftB2_", c)}}, Body: body})
 			}
 		}
 

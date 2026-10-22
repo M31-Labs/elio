@@ -53,6 +53,9 @@ type Graph struct {
 	Passes     []Pass            `json:"passes"`
 	FrameSwaps [][2]string       `json:"frameSwaps"`
 	Exports    map[string]string `json:"exports"`
+	// ExportParams lists numeric params the surface binds as uniforms (for
+	// example a water offset wrapped per cascade).
+	ExportParams []string `json:"exportParams,omitempty"`
 }
 
 // Param is a named per-frame input of the graph. Params are evaluated in
@@ -71,7 +74,7 @@ type Source struct {
 	Kind  string  `json:"kind"`
 	Value float64 `json:"value"`          // value
 	Name  string  `json:"name,omitempty"` // frame
-	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor (one)
+	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor (one); mod is floored (the result takes the divisor's sign); the runner evaluates in f64
 	Args  []any   `json:"args,omitempty"` // expr: "param:<name>" or a number
 	Of    string  `json:"of,omitempty"`   // accumulate, delta: "param:<name>"
 }
@@ -109,10 +112,18 @@ type Resource struct {
 	Feed string `json:"feed,omitempty"`
 }
 
-// Pass is a kernel pass or a mipmap pass.
+// Pass is a kernel pass, a mipmap pass or a repeat of other passes.
+//
+// A repeat runs Body Count times with the param named Index set to 0 to
+// Count-1 (body uniform values refer to it as "param:<Index>"), and after
+// each iteration swaps every pair in Swap (the names then refer to each
+// other's resources, as with Graph.FrameSwaps). A runner may expand a repeat
+// itself: Expand is the reference expansion, and Validate checks the
+// expansion. Swaps must cancel by the end of the pass list, so a frame ends
+// with every resource where it began (FrameSwaps aside).
 type Pass struct {
 	Name   string `json:"name"`
-	Type   string `json:"type"` // "kernel" or "mipmap"
+	Type   string `json:"type"` // "kernel", "mipmap" or "repeat"
 	Kernel string `json:"kernel,omitempty"`
 	Entry  string `json:"entry,omitempty"`
 	// When is "always", "param:<boolParam>" or "changed:<p1>,<p2>,...": the
@@ -124,6 +135,11 @@ type Pass struct {
 	Bindings []Binding `json:"bindings,omitempty"`
 	Uniforms []Uniform `json:"uniforms,omitempty"`
 	Resource string    `json:"resource,omitempty"` // mipmap: the texture
+
+	Count int         `json:"count,omitempty"` // repeat: iterations
+	Index string      `json:"index,omitempty"` // repeat: the iteration param
+	Swap  [][2]string `json:"swap,omitempty"`  // repeat: resource pairs swapped after each iteration
+	Body  []Pass      `json:"body,omitempty"`  // repeat: the passes to run
 }
 
 // Target is a WebGL2 pass's render size and the elio_width uniform.
@@ -134,15 +150,36 @@ type Target struct {
 }
 
 // Binding binds a kernel binding to a resource; Level picks the mip level of
-// a texture.
+// a texture. Inside a repeat, LevelAt replaces Level with an expression of the
+// repeat's index.
 type Binding struct {
-	Name     string `json:"name"`
-	Resource string `json:"resource"`
-	Level    int    `json:"level"`
+	Name     string     `json:"name"`
+	Resource string     `json:"resource"`
+	Level    int        `json:"level"`
+	LevelAt  *IndexExpr `json:"levelAt,omitempty"`
+}
+
+// IndexExpr is a number computed from a repeat's index i, for a uniform value
+// or a binding level inside the repeat's body: i + Offset, or, when Shr is
+// set, max(Shr >> (i + Offset), 1) (the size of a mip level). A runner that
+// expands repeats evaluates these with integer arithmetic.
+type IndexExpr struct {
+	Index  string `json:"index"`
+	Offset int    `json:"offset,omitempty"`
+	Shr    int    `json:"shr,omitempty"`
+}
+
+func (x IndexExpr) eval(i int) int {
+	i += x.Offset
+	if x.Shr != 0 {
+		return max(x.Shr>>i, 1)
+	}
+	return i
 }
 
 // Uniform gives every field of a kernel's uniform struct a number or a
-// "param:<name>" reference.
+// "param:<name>" reference, or, inside a repeat, an IndexExpr. Fields whose names start with "_pad" may be
+// omitted; the runner zero-fills them.
 type Uniform struct {
 	Name   string         `json:"name"`
 	Values map[string]any `json:"values"`

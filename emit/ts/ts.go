@@ -66,6 +66,12 @@ type Meta struct {
 	// bundler that concatenates scripts into an IIFE chunk cannot consume
 	// `export`. Global must be a plain identifier.
 	Global string
+	// Backend, when "webgpu" or "webgl2", writes only that backend's content: for
+	// webgpu every kernel's WGSL, workgroup sizes, bindings and WGSL uniform
+	// layouts; for webgl2 only the gather kernels' GLSL, gather layouts, bindings
+	// and std140 uniform layouts (as `uniforms`); in both cases only the graphs
+	// of that backend. Empty writes everything (the form the tests use).
+	Backend string
 }
 
 type bindingJSON struct {
@@ -144,10 +150,18 @@ func Emit(set KernelSet, meta Meta) (string, error) {
 	if meta.Global != "" && !identRE.MatchString(meta.Global) {
 		return "", fmt.Errorf("ts: global name %q is not an identifier", meta.Global)
 	}
+	if meta.Backend != "" && meta.Backend != graph.WebGPU && meta.Backend != graph.WebGL2 {
+		return "", fmt.Errorf("ts: backend %q is not webgpu or webgl2", meta.Backend)
+	}
+	wantWGSL := meta.Backend != graph.WebGL2
+	wantGLSL := meta.Backend != graph.WebGPU
 	var body strings.Builder
 	h := sha256.New()
 	seen := map[string]bool{}
 	for _, k := range set.Kernels {
+		if meta.Backend == graph.WebGL2 && !k.Gather {
+			continue // WebGL2 runs gather kernels only
+		}
 		stem := camel(k.Name)
 		if seen[stem] {
 			return "", fmt.Errorf("ts: duplicate kernel name %q", k.Name)
@@ -163,37 +177,45 @@ func Emit(set KernelSet, meta Meta) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		src, err := wgsl.Emit(k.Module)
-		if err != nil {
-			return "", fmt.Errorf("ts: kernel %q: wgsl: %w", k.Name, err)
-		}
-		h.Write([]byte(src))
-		ms := []member{
-			{"wgsl", "WGSL", "", "`" + escapeTemplate(src) + "`"},
-			{"entry", "Entry", "", quote(entry.Name)},
-			{"workgroup", "Workgroup", "", fmt.Sprintf("[%d, %d, %d]", entry.WorkgroupSize[0], entry.WorkgroupSize[1], entry.WorkgroupSize[2])},
-		}
-		if len(k.Module.Kernels) > 1 {
-			var es []entryJSON
-			for _, e := range k.Module.Kernels {
-				es = append(es, entryJSON{Entry: e.Name, Workgroup: e.WorkgroupSize})
+		var ms []member
+		if wantWGSL {
+			src, err := wgsl.Emit(k.Module)
+			if err != nil {
+				return "", fmt.Errorf("ts: kernel %q: wgsl: %w", k.Name, err)
 			}
-			ms = append(ms, member{"entries", "Entries", "ElioEntry[]", jsonLit(es)})
+			h.Write([]byte(src))
+			ms = append(ms, member{"wgsl", "WGSL", "", "`" + escapeTemplate(src) + "`"})
+		}
+		ms = append(ms, member{"entry", "Entry", "", quote(entry.Name)})
+		if wantWGSL {
+			ms = append(ms, member{"workgroup", "Workgroup", "", fmt.Sprintf("[%d, %d, %d]", entry.WorkgroupSize[0], entry.WorkgroupSize[1], entry.WorkgroupSize[2])})
+			if len(k.Module.Kernels) > 1 {
+				var es []entryJSON
+				for _, e := range k.Module.Kernels {
+					es = append(es, entryJSON{Entry: e.Name, Workgroup: e.WorkgroupSize})
+				}
+				ms = append(ms, member{"entries", "Entries", "ElioEntry[]", compactLit(es)})
+			}
 		}
 		bs, err := bindings(k.Module)
 		if err != nil {
 			return "", fmt.Errorf("ts: kernel %q: %w", k.Name, err)
 		}
-		ms = append(ms, member{"bindings", "Bindings", "ElioBinding[]", jsonLit(bs)})
+		ms = append(ms, member{"bindings", "Bindings", "ElioBinding[]", compactLit(bs)})
 		wu, su, differ, err := uniforms(k.Module)
 		if err != nil {
 			return "", fmt.Errorf("ts: kernel %q: %w", k.Name, err)
 		}
-		ms = append(ms, member{"uniforms", "Uniforms", "ElioUniform[]", jsonLit(wu)})
-		if k.Gather && differ {
-			ms = append(ms, member{"uniformsStd140", "UniformsStd140", "ElioUniform[]", jsonLit(su)})
+		switch {
+		case meta.Backend == graph.WebGL2:
+			ms = append(ms, member{"uniforms", "Uniforms", "ElioUniform[]", compactLit(su)})
+		default:
+			ms = append(ms, member{"uniforms", "Uniforms", "ElioUniform[]", compactLit(wu)})
+			if k.Gather && differ && wantGLSL {
+				ms = append(ms, member{"uniformsStd140", "UniformsStd140", "ElioUniform[]", compactLit(su)})
+			}
 		}
-		if k.Gather {
+		if k.Gather && wantGLSL {
 			if errs := sema.CheckGather(k.Module, entry.Name); len(errs) > 0 {
 				return "", fmt.Errorf("ts: kernel %q is not gather-compatible: %w", k.Name, errors.Join(errs...))
 			}
@@ -204,7 +226,7 @@ func Emit(set KernelSet, meta Meta) (string, error) {
 			h.Write([]byte(glsl))
 			ms = append(ms,
 				member{"glsl", "GLSL", "", "`" + escapeTemplate(glsl) + "`"},
-				member{"gatherLayout", "GatherLayout", "ElioGatherLayout", jsonLit(gatherLayout(lay))})
+				member{"gatherLayout", "GatherLayout", "ElioGatherLayout", compactLit(gatherLayout(lay))})
 		}
 		if meta.Global != "" {
 			fmt.Fprintf(&body, "\n    // --- %s ---\n    %s: {\n", k.Name, stem)
@@ -223,7 +245,7 @@ func Emit(set KernelSet, meta Meta) (string, error) {
 			}
 		}
 	}
-	graphsLit, err := graphsLiteral(set)
+	graphsLit, err := graphsLiteral(set, meta.Backend, h)
 	if err != nil {
 		return "", err
 	}
@@ -231,7 +253,7 @@ func Emit(set KernelSet, meta Meta) (string, error) {
 	var out strings.Builder
 	fmt.Fprintf(&out, "// Code generated by elio emit ts; DO NOT EDIT.\n")
 	fmt.Fprintf(&out, "// Elio %s, kernel set %q.\n", meta.Version, set.Name)
-	fmt.Fprintf(&out, "// sha256: %s (of the WGSL and GLSL sources below, in order)\n", sum)
+	fmt.Fprintf(&out, "// sha256: %s (of the shader sources and graphs below, in order)\n", sum)
 	if meta.Global == "" {
 		out.WriteString(header)
 		out.WriteString(body.String())
