@@ -16,6 +16,10 @@
 // moves by (-shiftX, -shiftZ). The cells that enter (the last shiftX columns when
 // shiftX > 0, the first -shiftX when shiftX < 0, likewise for z; everything when
 // |shift| >= width) reuse the slots of cells that left, so their foam is cleared.
+// The window origin in metres, originX cell, is wrapped per cascade by the host
+// into omX0..3 / omZ0..3 = mod(originX cell, size_c) (floored, in float64); the
+// kernel samples cascade c at om_c + (u + 0.5) cell for window column u, wrapping
+// into the tile. Unused cascade slots may hold anything finite.
 // Both outputs use this toroidal layout: sample with the world cell modulo width
 // and wrap addressing; no origin is needed in the shader.
 //
@@ -62,6 +66,14 @@ struct OceanFoamParams {
   size1: f32;
   size2: f32;
   size3: f32;
+  omX0: f32;
+  omX1: f32;
+  omX2: f32;
+  omX3: f32;
+  omZ0: f32;
+  omZ1: f32;
+  omZ2: f32;
+  omZ3: f32;
 }
 
 @group(0) @binding(0) uniform foam: OceanFoamParams;
@@ -81,8 +93,6 @@ struct OceanFoamParams {
   // Position of this buffer texel relative to the window origin, 0..width-1.
   let ru = ((i32(i % w) - foam.originX) % wi + wi) % wi;
   let rv = ((i32(i / w) - foam.originZ) % wi + wi) % wi;
-  let wx = foam.originX + ru;
-  let wz = foam.originZ + rv;
 
   // Did this cell wrap in this frame?
   var entered = false;
@@ -99,29 +109,38 @@ struct OceanFoamParams {
     if rv < 0 - foam.shiftZ { entered = true; }
   }
 
-  // Jacobian terms summed over cascades at the cell centre.
-  let px = (f32(wx) + 0.5) * foam.cell;
-  let pz = (f32(wz) + 0.5) * foam.cell;
+  // Jacobian terms summed over cascades at the cell centre. The position in
+  // cascade c is omX_c + (ru + 0.5) cell: the window origin wrapped into the
+  // tile (by the host, in float64) plus the local offset, so this kernel never
+  // forms a large world coordinate in f32.
   var sxx = 0.0;
   var szz = 0.0;
   var sxz = 0.0;
   for (var c: u32 = 0u; c < foam.cascades; c = c + 1u) {
     var nc = foam.n0;
     var lc = foam.size0;
+    var ox = foam.omX0;
+    var oz = foam.omZ0;
     if c == 1u {
       nc = foam.n1;
       lc = foam.size1;
+      ox = foam.omX1;
+      oz = foam.omZ1;
     }
     if c == 2u {
       nc = foam.n2;
       lc = foam.size2;
+      ox = foam.omX2;
+      oz = foam.omZ2;
     }
     if c == 3u {
       nc = foam.n3;
       lc = foam.size3;
+      ox = foam.omX3;
+      oz = foam.omZ3;
     }
-    let u = px / lc;
-    let v = pz / lc;
+    let u = (ox + (f32(ru) + 0.5) * foam.cell) / lc;
+    let v = (oz + (f32(rv) + 0.5) * foam.cell) / lc;
     let fxs = (u - floor(u)) * f32(nc);
     let fzs = (v - floor(v)) * f32(nc);
     let fxf = floor(fxs);

@@ -66,7 +66,8 @@ var spectrumParams = []string{"windSpeed", "fetch", "gamma", "spread", "swell", 
 // Params the app sets (value): windSpeed, fetch (km), gamma, spread, swell,
 // windDirDeg and swellDirDeg (degrees as Scene3D authors them), seed,
 // loopPeriod, lambda (choppiness), timeScale, driftX and driftZ (water drift,
-// m/s), foamTau, foamThreshold, foamGain, probeCount and probePoints (WebGPU).
+// m/s), foamTau, foamThreshold, foamGain, probeCount, probePoints, probeOriginX
+// and probeOriginZ (WebGPU; points are relative to probeOrigin, in world metres).
 // The graph derives the rest: windDir and swellDir (travel angles
 // pi/2 - deg pi/180), simTime (timeScale integrated), phaseTime (simTime mod
 // loopPeriod), waterX and waterZ (drift integrated), and the foam window's
@@ -113,6 +114,8 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 	b.Value("foamTau", graph.F32, 4).Value("foamThreshold", graph.F32, 0.9).Value("foamGain", graph.F32, 2)
 	b.Value("probeCount", graph.U32, 0)
 	if gpu {
+		// Probe points are relative to probeOrigin (world metres, set near the vessel).
+		b.Value("probeOriginX", graph.F32, 0).Value("probeOriginZ", graph.F32, 0)
 		b.BufferParam("probePoints", "vec4<f32>", probeMax)
 	}
 	b.Frame("dt", "dt").Frame("cameraX", "cameraX").Frame("cameraZ", "cameraZ")
@@ -139,6 +142,19 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		b.Expr("foamCell"+ax, graph.F32, "floor", ref("foamTexel"+ax))
 		b.Expr("foamOrigin"+ax, graph.I32, "sub", ref("foamCell"+ax), foamWidth/2)
 		b.Delta("foamShift"+ax, graph.I32, "foamOrigin"+ax)
+		// The foam kernel samples cascade c at the window origin wrapped into
+		// the tile plus a local offset, so it forms no large coordinate in f32.
+		b.Expr("foamOriginMeters"+ax, graph.F32, "mul", ref("foamOrigin"+ax), foamCell)
+		for c := 0; c < cascades; c++ {
+			b.Expr(fmt.Sprintf("foamOriginMod%d%s", c, ax), graph.F32, "mod", ref("foamOriginMeters"+ax), oceanCascades[c].size)
+		}
+		if gpu {
+			// The probe's point origin in the water frame, wrapped per cascade.
+			b.Expr("probeLocal"+ax, graph.F32, "sub", ref("probeOrigin"+ax), ref("water"+ax))
+			for c := 0; c < cascades; c++ {
+				b.Expr(fmt.Sprintf("probeOriginMod%d%s", c, ax), graph.F32, "mod", ref("probeLocal"+ax), oceanCascades[c].size)
+			}
+		}
 	}
 
 	size := func(c int) int {
@@ -161,15 +177,15 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 	// Mips: WebGPU downsamples level by level; WebGL2 calls generateMipmap.
 	mipChain := func(pre, tex string, w, mips int) {
 		if !gpu {
-			b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "mipmap", Resource: tex, When: "always"})
+			b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "mipmap", Resource: tex})
 			return
 		}
 		// One repeat over the levels: level l+1 is written from level l. The
 		// dispatch is sized for level 1; smaller levels leave the extra
 		// workgroups idle (the kernel returns past its destination size).
 		half := max(w>>1, 1)
-		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", When: "always", Body: []graph.Pass{
-			{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip", When: "always",
+		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", Body: []graph.Pass{
+			{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip",
 				Dispatch: b.Workgroups("ocean_mip", "ocean_mip", half*half),
 				Bindings: []graph.Binding{
 					{Name: "src", Resource: tex, LevelAt: &graph.IndexExpr{Index: "l"}},
@@ -206,7 +222,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		b.Pass(place(sp, "ocean_spectrum", nc, nc))
 
 		// Evolve to the phase time.
-		ev := graph.Pass{Name: pre + "evolve", Type: "kernel", Kernel: "ocean_evolve", Entry: "ocean_evolve", When: "always",
+		ev := graph.Pass{Name: pre + "evolve", Type: "kernel", Kernel: "ocean_evolve", Entry: "ocean_evolve",
 			Bindings: []graph.Binding{{Name: "h0", Resource: name("h0_", c)}, {Name: "omega", Resource: name("omega_", c)},
 				{Name: "outA", Resource: name("fftA_", c)}, {Name: "outB", Resource: name("fftB_", c)}},
 			Uniforms: []graph.Uniform{b.Uniform("ocean_evolve", "ev", map[string]any{
@@ -219,7 +235,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		if gpu {
 			for _, x := range []string{"A", "B"} {
 				for _, entry := range []string{"fft_rows", "fft_cols"} {
-					b.Pass(graph.Pass{Name: pre + "fft" + x + "." + entry, Type: "kernel", Kernel: fk, Entry: entry, When: "always",
+					b.Pass(graph.Pass{Name: pre + "fft" + x + "." + entry, Type: "kernel", Kernel: fk, Entry: entry,
 						Dispatch: &[3]int{nc, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: name("fft"+x+"_", c)}}})
 				}
 			}
@@ -230,17 +246,17 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 			for axis, label := range []string{"rows", "cols"} {
 				var body []graph.Pass
 				for _, x := range []string{"A", "B"} {
-					body = append(body, place(graph.Pass{Name: x, Type: "kernel", Kernel: gk, Entry: "fft_stage", When: "always",
+					body = append(body, place(graph.Pass{Name: x, Type: "kernel", Kernel: gk, Entry: "fft_stage",
 						Bindings: []graph.Binding{{Name: "src", Resource: name("fft"+x+"_", c)}, {Name: "dst", Resource: name("fft"+x+"2_", c)}},
 						Uniforms: []graph.Uniform{b.Uniform(gk, "fft", map[string]any{"n": nc, "stage": ref("s"), "axis": axis})}}, gk, nc, nc))
 				}
-				b.Pass(graph.Pass{Name: pre + "fft." + label, Type: "repeat", Count: bitsLen(nc), Index: "s", When: "always",
+				b.Pass(graph.Pass{Name: pre + "fft." + label, Type: "repeat", Count: bitsLen(nc), Index: "s",
 					Swap: [][2]string{{name("fftA_", c), name("fftA2_", c)}, {name("fftB_", c), name("fftB2_", c)}}, Body: body})
 			}
 		}
 
 		// Assemble into the cascade textures, then mips.
-		as := graph.Pass{Name: pre + "assemble", Type: "kernel", Kernel: "ocean_assemble", Entry: "ocean_assemble", When: "always",
+		as := graph.Pass{Name: pre + "assemble", Type: "kernel", Kernel: "ocean_assemble", Entry: "ocean_assemble",
 			Bindings: []graph.Binding{{Name: "fieldA", Resource: name("fftA_", c)}, {Name: "fieldB", Resource: name("fftB_", c)},
 				{Name: "disp", Resource: name("dispTex", c)}, {Name: "slope", Resource: name("slopeTex", c)}},
 			Uniforms: []graph.Uniform{b.Uniform("ocean_assemble", "assem", map[string]any{"n": nc, "lambda": ref("lambda")})}}
@@ -263,6 +279,11 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		"dt": ref("dt"), "tau": ref("foamTau"), "threshold": ref("foamThreshold"), "gain": ref("foamGain"),
 		"lambda": ref("lambda"), "cell": foamCell,
 	}
+	for i := 0; i < 4; i++ {
+		c := min(i, cascades-1)
+		fu[fmt.Sprintf("omX%d", i)] = ref(fmt.Sprintf("foamOriginMod%dX", c))
+		fu[fmt.Sprintf("omZ%d", i)] = ref(fmt.Sprintf("foamOriginMod%dZ", c))
+	}
 	foamBind := []graph.Binding{{Name: "foamIn", Resource: "foamA"}}
 	probeBind := []graph.Binding{}
 	for i := 0; i < 4; i++ {
@@ -273,7 +294,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		probeBind = append(probeBind, graph.Binding{Name: fmt.Sprintf("disp%d", i), Resource: name("fftA_", c)})
 	}
 	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"})
-	b.Pass(place(graph.Pass{Name: "foam", Type: "kernel", Kernel: "ocean_foam", Entry: "ocean_foam", When: "always",
+	b.Pass(place(graph.Pass{Name: "foam", Type: "kernel", Kernel: "ocean_foam", Entry: "ocean_foam",
 		Bindings: foamBind, Uniforms: []graph.Uniform{b.Uniform("ocean_foam", "foam", fu)}}, "ocean_foam", foamWidth, foamWidth))
 	mipChain("", "foamTex", foamWidth, foamMips)
 	b.Swap("foamA", "foamB").Export("foam", "foamTex")
@@ -286,10 +307,12 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		for i := 0; i < 4; i++ {
 			c := min(i, cascades-1)
 			pu[fmt.Sprintf("n%d", i)], pu[fmt.Sprintf("size%d", i)] = size(c), oceanCascades[c].size
+			pu[fmt.Sprintf("omX%d", i)] = ref(fmt.Sprintf("probeOriginMod%dX", c))
+			pu[fmt.Sprintf("omZ%d", i)] = ref(fmt.Sprintf("probeOriginMod%dZ", c))
 		}
 		bind := append([]graph.Binding{{Name: "points", Resource: "probePoints"}}, probeBind...)
 		bind = append(bind, graph.Binding{Name: "out", Resource: "probeOut"})
-		b.Pass(graph.Pass{Name: "probe", Type: "kernel", Kernel: "ocean_probe", Entry: "ocean_probe", When: "always",
+		b.Pass(graph.Pass{Name: "probe", Type: "kernel", Kernel: "ocean_probe", Entry: "ocean_probe",
 			Dispatch: b.Workgroups("ocean_probe", "ocean_probe", probeMax), Bindings: bind,
 			Uniforms: []graph.Uniform{b.Uniform("ocean_probe", "probe", pu)}})
 		b.Export("probe", "probeOut")

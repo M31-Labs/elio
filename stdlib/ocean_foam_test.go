@@ -1,6 +1,7 @@
 package stdlib
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -21,7 +22,7 @@ type foamParams struct {
 }
 
 func (p foamParams) uniform() map[string]any {
-	return map[string]any{
+	u := map[string]any{
 		"width": int64(p.width), "cascades": int64(p.cascades), "_pad0": int64(0), "_pad1": int64(0),
 		"originX": int64(p.originX), "originZ": int64(p.originZ), "shiftX": int64(p.shiftX), "shiftZ": int64(p.shiftZ),
 		"dt": p.dt, "tau": p.tau, "threshold": p.threshold, "gain": p.gain,
@@ -29,6 +30,27 @@ func (p foamParams) uniform() map[string]any {
 		"n0": int64(p.n[0]), "n1": int64(p.n[1]), "n2": int64(p.n[2]), "n3": int64(p.n[3]),
 		"size0": p.tile[0], "size1": p.tile[1], "size2": p.tile[2], "size3": p.tile[3],
 	}
+	// The kernel samples cascade c at omX/omZ (the window origin in metres
+	// wrapped into the tile, computed here in float64 as the graph does) plus
+	// the local texel offset, so it never forms a large coordinate.
+	for c := 0; c < 4; c++ {
+		u[fmt.Sprintf("omX%d", c)] = wrapTile(float64(p.originX)*p.cell, p.tile[c])
+		u[fmt.Sprintf("omZ%d", c)] = wrapTile(float64(p.originZ)*p.cell, p.tile[c])
+	}
+	return u
+}
+
+// wrapTile is a mod size in [0, size), computed in float64; 0 for an unused
+// cascade (size 0).
+func wrapTile(a, size float64) float64 {
+	if size == 0 {
+		return 0
+	}
+	m := math.Mod(a, size)
+	if m < 0 {
+		m += size
+	}
+	return m
 }
 
 // foamBuffers are the post-FFT B buffers of the cascades: fieldB[c] holds n*n

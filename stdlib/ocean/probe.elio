@@ -14,6 +14,14 @@
 //   ocean_foam applies it to the B buffers, so the host binds the same buffers
 //   it gives ocean_assemble and ocean_foam.
 //
+// Host convention (precision). Points are RELATIVE to a local origin O (world
+// metres, in the water frame, set by the host near the vessel), not absolute, so
+// the kernel only ever sees small numbers. For each cascade c the host passes
+// omX_c, omZ_c = mod(O, size_c) (floored, computed in float64); cascade c is
+// sampled at (rest position + om_c) / size_c, wrapping into the tile. Heights
+// and normals are those at O + point; with O = 0 and om = 0 this is the old
+// absolute behaviour.
+//
 // Method. The surface point drawn at world position q came from the rest
 // position p with p + D_h(p) = q, where D_h = lambda (Dx, Dz) summed over cascades,
 // each sampled bilinearly. The kernel solves for p with two fixed-point steps
@@ -44,6 +52,14 @@ struct OceanProbeParams {
   normalStep: f32;
   lambda: f32;
   _pad3: f32;
+  omX0: f32;
+  omX1: f32;
+  omX2: f32;
+  omX3: f32;
+  omZ0: f32;
+  omZ1: f32;
+  omZ2: f32;
+  omZ3: f32;
 }
 
 @group(0) @binding(0) uniform probe: OceanProbeParams;
@@ -86,21 +102,30 @@ struct OceanProbeParams {
       for (var c: u32 = 0u; c < probe.cascades; c = c + 1u) {
         var nc = probe.n0;
         var lc = probe.size0;
+        var ox = probe.omX0;
+        var oz = probe.omZ0;
         if c == 1u {
           nc = probe.n1;
           lc = probe.size1;
+          ox = probe.omX1;
+          oz = probe.omZ1;
         }
         if c == 2u {
           nc = probe.n2;
           lc = probe.size2;
+          ox = probe.omX2;
+          oz = probe.omZ2;
         }
         if c == 3u {
           nc = probe.n3;
           lc = probe.size3;
+          ox = probe.omX3;
+          oz = probe.omZ3;
         }
-        // Bilinear sample of the periodic n x n tile at (px, pz).
-        let u = px / lc;
-        let v = pz / lc;
+        // Bilinear sample of the periodic n x n tile at the local point plus
+        // the cascade's wrapped origin offset.
+        let u = (px + ox) / lc;
+        let v = (pz + oz) / lc;
         let fxs = (u - floor(u)) * f32(nc);
         let fzs = (v - floor(v)) * f32(nc);
         let fxf = floor(fxs);

@@ -188,3 +188,74 @@ func TestOceanGraphWaterWrap(t *testing.T) {
 		}
 	}
 }
+
+// Foam and probe never form a large coordinate in f32: the graph computes, in
+// f64, each cascade's wrapped window or point origin.
+func TestOceanGraphWrappedOrigins(t *testing.T) {
+	gs, _ := loadGraphs(t)
+	sizes := []float64{1600, 250, 37, 5.3}
+	for _, key := range graphKeys {
+		g := gs[key]
+		cascades := 4
+		if g.Tier == "low" {
+			cascades = 3
+		}
+		params := map[string]graph.Param{}
+		for _, p := range g.Params {
+			params[p.Name] = p
+		}
+		wantExpr := func(name, op string, a, b any) {
+			t.Helper()
+			p, ok := params[name]
+			if !ok {
+				t.Errorf("%s: no param %s", key, name)
+				return
+			}
+			if p.Source.Kind != graph.SourceExpr || p.Source.Op != op || p.Source.Args[0] != a || p.Source.Args[1] != b {
+				t.Errorf("%s: %s source %+v, want %s(%v, %v)", key, name, p.Source, op, a, b)
+			}
+		}
+		uniform := func(pass, field string) any {
+			flat, err := graph.Expand(g)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range flat.Passes {
+				if p.Name == pass {
+					return p.Uniforms[0].Values[field]
+				}
+			}
+			t.Fatalf("%s: no pass %s", key, pass)
+			return nil
+		}
+		for _, ax := range []string{"X", "Z"} {
+			wantExpr("foamOriginMeters"+ax, "mul", "param:foamOrigin"+ax, 0.5)
+			for c := 0; c < cascades; c++ {
+				wantExpr(fmt.Sprintf("foamOriginMod%d%s", c, ax), "mod", "param:foamOriginMeters"+ax, sizes[c])
+				if got := uniform("foam", fmt.Sprintf("om%s%d", ax, c)); got != fmt.Sprintf("param:foamOriginMod%d%s", c, ax) {
+					t.Errorf("%s: foam om%s%d = %v", key, ax, c, got)
+				}
+			}
+			// An unused cascade slot repeats the last real cascade's offset.
+			if got := uniform("foam", "om"+ax+"3"); got != fmt.Sprintf("param:foamOriginMod%d%s", cascades-1, ax) {
+				t.Errorf("%s: foam om%s3 = %v", key, ax, got)
+			}
+			if g.Backend != "webgpu" {
+				if _, ok := params["probeOrigin"+ax]; ok {
+					t.Errorf("%s: probe params on webgl2", key)
+				}
+				continue
+			}
+			if p := params["probeOrigin"+ax]; p.Source.Kind != graph.SourceValue || p.Type != graph.F32 {
+				t.Errorf("%s: probeOrigin%s = %+v", key, ax, p)
+			}
+			wantExpr("probeLocal"+ax, "sub", "param:probeOrigin"+ax, "param:water"+ax)
+			for c := 0; c < cascades; c++ {
+				wantExpr(fmt.Sprintf("probeOriginMod%d%s", c, ax), "mod", "param:probeLocal"+ax, sizes[c])
+				if got := uniform("probe", fmt.Sprintf("om%s%d", ax, c)); got != fmt.Sprintf("param:probeOriginMod%d%s", c, ax) {
+					t.Errorf("%s: probe om%s%d = %v", key, ax, c, got)
+				}
+			}
+		}
+	}
+}

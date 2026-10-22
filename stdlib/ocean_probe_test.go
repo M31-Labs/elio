@@ -121,6 +121,13 @@ func oceanProbeCascades(t *testing.T, n int, tm, lambda float64) []probeCascade 
 // runOceanProbe runs the kernel over pts with the cascades' raw buffers and the
 // choppiness lambda in the uniform, and returns the out buffer.
 func runOceanProbe(t *testing.T, cs []probeCascade, lambda, tm, step float64, pts []any) []any {
+	return runOceanProbeWith(t, cs, lambda, tm, step, pts, [4]float64{}, [4]float64{}, run.Options{})
+}
+
+// runOceanProbeWith also takes the per-cascade wrapped origin offsets (the
+// points are relative to an origin whose offset in cascade c's tile is
+// omX[c], omZ[c]) and interpreter options.
+func runOceanProbeWith(t *testing.T, cs []probeCascade, lambda, tm, step float64, pts []any, omX, omZ [4]float64, opts run.Options) []any {
 	t.Helper()
 	m, err := OceanProbe()
 	if err != nil {
@@ -148,11 +155,13 @@ func runOceanProbe(t *testing.T, cs []probeCascade, lambda, tm, step float64, pt
 	for c := 0; c < 4; c++ {
 		u[probeField("n", c)] = int64(cs[c].n)
 		u[probeField("size", c)] = cs[c].tile
+		u[probeField("omX", c)] = omX[c]
+		u[probeField("omZ", c)] = omZ[c]
 	}
 	mem := &run.Memory{Vars: map[string]any{
 		"probe": u, "points": pts, "disp0": bufs[0], "disp1": bufs[1], "disp2": bufs[2], "disp3": bufs[3], "out": out,
 	}}
-	if err := run.Run(m, "ocean_probe", count, mem); err != nil {
+	if err := run.RunWith(m, "ocean_probe", count, mem, opts); err != nil {
 		t.Fatal(err)
 	}
 	return out

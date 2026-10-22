@@ -246,7 +246,7 @@ func levelSize(r Resource, level int) (w, h int) {
 
 func (v *validator) checkWhen(pass, when string) {
 	switch {
-	case when == "always":
+	case when == "always" || when == "":
 	case strings.HasPrefix(when, "param:"):
 		n, _ := refName(when)
 		if p, ok := v.params[n]; !ok {
