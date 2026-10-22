@@ -57,6 +57,43 @@ func OceanProbe() (*ir.Module, error) {
 	return parseOcean("ocean/probe.elio", OceanProbeSource, false)
 }
 
+// OceanAssembleSource is the .elio source of ocean_assemble: it applies
+// choppiness to the inverse-FFT output buffers and writes the displacement and
+// slope rgba16float textures. It is gather-compatible (two RGBA16F outputs).
+//
+//go:embed ocean/assemble.elio
+var OceanAssembleSource string
+
+// OceanAssemble builds the ocean_assemble module from OceanAssembleSource.
+func OceanAssemble() (*ir.Module, error) {
+	return parseOcean("ocean/assemble.elio", OceanAssembleSource, false)
+}
+
+// OceanMipSource is the .elio source of ocean_mip: a 2x2 box downsample of one
+// []vec4 level into an rgba16float texture level. It is gather-compatible.
+//
+//go:embed ocean/mip.elio
+var OceanMipSource string
+
+// OceanMip builds the ocean_mip module from OceanMipSource.
+func OceanMip() (*ir.Module, error) {
+	return parseOcean("ocean/mip.elio", OceanMipSource, false)
+}
+
+// OceanFoamSource is the .elio source of ocean_foam: persistent crest foam on a
+// toroidal state buffer, with wrap-in clearing, decay and injection from the
+// Jacobian summed over cascades. The source header documents the toroidal
+// layout and the host inputs. It is gather-compatible (one f32 buffer and one
+// RGBA16F texture).
+//
+//go:embed ocean/foam.elio
+var OceanFoamSource string
+
+// OceanFoam builds the ocean_foam module from OceanFoamSource.
+func OceanFoam() (*ir.Module, error) {
+	return parseOcean("ocean/foam.elio", OceanFoamSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)

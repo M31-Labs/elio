@@ -2,13 +2,20 @@
 // One invocation per bin of an n x n grid in natural FFT order. It writes
 //
 //   h0[i]    = (Re h0(k), Im h0(k), Re conj h0(-k), Im conj h0(-k))
-//   omega[i] = sqrt(g |k|)                            rad/s, deep water
+//   omega[i] = omega0 floor(sqrt(g |k|) / omega0)     rad/s, deep water, quantized
 //
 // for the bin's wavevector k = (2 pi ix / L, 2 pi iz / L), where ix and iz are
 // the signed indices (ix = x if x < n/2 else x - n; same for iz) and L is the
 // tile size in metres. The mirror bin of (x, z) is ((n-x) mod n, (n-z) mod n);
 // its index is (-ix, -iz), so the mirror bin's (zw) lanes are the conjugate of
 // this bin's (xy) lanes, which is what makes every evolved field Hermitian.
+//
+// omega0 = 2 pi / T_loop, with T_loop = spec.loopPeriod seconds (default 1000 when
+// the field is 0). Quantizing omega makes the evolved field exactly periodic
+// with period T_loop, so the host can pass t mod T_loop and f32 time never grows.
+// The change from sqrt(g k) is at most omega0 / omega (0.63% at omega = 1 rad/s);
+// over the non-zero bins of the default spectrum the largest change is 1.5%, and
+// 1.2% for omega between 0.5 and 3 times the peak frequency.
 //
 // Units: k rad/m, omega rad/s, S(omega) m^2 s, S(kx, kz) m^4, h0 metres.
 // A bin is non-zero only if k_min <= |k| < k_max, it is not on the Nyquist row
@@ -63,7 +70,7 @@ struct OceanSpectrumParams {
   tile: f32;
   kMin: f32;
   kMax: f32;
-  _pad1: f32;
+  loopPeriod: f32;
   _pad2: f32;
 }
 
@@ -84,7 +91,14 @@ struct OceanSpectrumParams {
   if z >= n / 2u { iz0 = i32(z) - i32(n); }
   let dk = 6.283185307179586 / spec.tile;
   let k0 = dk * sqrt(f32(ix0) * f32(ix0) + f32(iz0) * f32(iz0));
-  omega[i] = sqrt(G * k0);
+  // Looping dispersion: omega_q = omega0 floor(omega / omega0), omega0 = 2 pi / T_loop,
+  // so every bin turns a whole number of cycles in T_loop and the evolved field
+  // repeats exactly with that period. A loopPeriod of 0 (or less) means the
+  // default 1000 s.
+  var tloop = spec.loopPeriod;
+  if tloop <= 0.0 { tloop = 1000.0; }
+  let omega0 = 6.283185307179586 / tloop;
+  omega[i] = omega0 * floor(sqrt(G * k0) / omega0);
 
   // Is this bin inside the band and off the Nyquist lines and k = 0?
   var inband = true;

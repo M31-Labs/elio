@@ -1,0 +1,34 @@
+// mip.elio — ocean_mip: one level of a 2x2 box downsample. One invocation per
+// texel of the destination level (dstWidth x dstHeight). Gather-compatible: one
+// RGBA16F storage-texture output; the pass width is mip.dstWidth.
+//
+// Input: src is the previous level as a []vec4, row-major (index y * srcWidth + x),
+// srcWidth x srcHeight, the full-precision contents of the level above (for level
+// 1, the displacement or slope values; the host binds the level as a sampled
+// texture or buffer, because a write-only storage texture cannot be read).
+// dst[x, y] = mean of the four source texels (2x, 2y) to (2x + 1, 2y + 1); at an
+// odd edge the second tap clamps to the last row or column, so reads stay in bounds.
+
+struct OceanMipParams {
+  srcWidth: u32;
+  srcHeight: u32;
+  dstWidth: u32;
+  dstHeight: u32;
+}
+
+@group(0) @binding(0) uniform mip: OceanMipParams;
+@group(0) @binding(1) storage read src: []vec4;
+@group(0) @binding(2) storage write dst: tex2d_rgba16float;
+
+@workgroup(64) kernel ocean_mip(gid: global_invocation_id) {
+  let i = gid.x;
+  if i >= mip.dstWidth * mip.dstHeight { return; }
+  let dx = i % mip.dstWidth;
+  let dy = i / mip.dstWidth;
+  let x0 = dx * 2u;
+  let y0 = dy * 2u;
+  let x1 = min(x0 + 1u, mip.srcWidth - 1u);
+  let y1 = min(y0 + 1u, mip.srcHeight - 1u);
+  let sum = src[y0 * mip.srcWidth + x0] + src[y0 * mip.srcWidth + x1] + src[y1 * mip.srcWidth + x0] + src[y1 * mip.srcWidth + x1];
+  textureStore(dst, vec2u(i % mip.dstWidth, i / mip.dstWidth), sum * 0.25);
+}

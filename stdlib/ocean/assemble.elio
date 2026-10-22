@@ -1,0 +1,41 @@
+// assemble.elio — ocean_assemble: apply choppiness and write the two cascade
+// textures. One invocation per texel of an n x n grid (index z * n + x, natural
+// FFT order, which needs no (-1)^(x+z) sign). Gather-compatible: two RGBA16F
+// storage-texture outputs (16 bytes per pixel); the pass width is assem.n.
+//
+// Inputs: the two buffers the inverse FFT leaves after ocean_evolve, unscaled:
+//   fieldA = (Dy, Dx, Dz, dDy/dx)
+//   fieldB = (dDy/dz, dDx/dx, dDz/dz, dDx/dz)
+// Choppiness lambda (>= 0) scales the horizontal displacement and everything
+// derived from it. Outputs (rgba16float):
+//   disp  = (lambda Dx, Dy, lambda Dz, lambda dDx/dz)
+//   slope = (dDy/dx, dDy/dz, lambda dDx/dx, lambda dDz/dz)
+// The foam Jacobian J = (1 + sum slope.z)(1 + sum slope.w) - (sum disp.w)^2 is
+// formed from sums over cascades by the consumer; with lambda = 0 it is 1.
+
+struct OceanAssembleParams {
+  n: u32;
+  _pad0: u32;
+  _pad1: u32;
+  _pad2: u32;
+  lambda: f32;
+  _pad3: f32;
+  _pad4: f32;
+  _pad5: f32;
+}
+
+@group(0) @binding(0) uniform assem: OceanAssembleParams;
+@group(0) @binding(1) storage read fieldA: []vec4;
+@group(0) @binding(2) storage read fieldB: []vec4;
+@group(0) @binding(3) storage write disp: tex2d_rgba16float;
+@group(0) @binding(4) storage write slope: tex2d_rgba16float;
+
+@workgroup(64) kernel ocean_assemble(gid: global_invocation_id) {
+  let i = gid.x;
+  if i >= assem.n * assem.n { return; }
+  let a = fieldA[i];
+  let b = fieldB[i];
+  let l = assem.lambda;
+  textureStore(disp, vec2u(i % assem.n, i / assem.n), vec4(l * a.y, a.x, l * a.z, l * b.w));
+  textureStore(slope, vec2u(i % assem.n, i / assem.n), vec4(a.w, b.x, l * b.y, l * b.z));
+}
