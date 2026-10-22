@@ -269,8 +269,8 @@ func texModule(format string, body ...ir.Stmt) *ir.Module {
 func TestStorageTexture(t *testing.T) {
 	store := ir.Do{Expr: ir.Call{Func: "textureStore", Args: []ir.Expr{
 		ir.Name{Name: "disp"},
-		ir.Call{Func: "vec2<u32>", Args: []ir.Expr{ir.Lit{Text: "1u"}, ir.Lit{Text: "2u"}}},
-		ir.Call{Func: "vec4<f32>", Args: []ir.Expr{ir.Lit{Text: "1.0"}, ir.Lit{Text: "0.0"}, ir.Lit{Text: "0.0"}, ir.Lit{Text: "1.0"}}},
+		ir.Call{Func: "vec2u", Args: []ir.Expr{ir.Lit{Text: "1u"}, ir.Lit{Text: "2u"}}},
+		ir.Call{Func: "vec4", Args: []ir.Expr{ir.Lit{Text: "1.0"}, ir.Lit{Text: "0.0"}, ir.Lit{Text: "0.0"}, ir.Lit{Text: "1.0"}}},
 	}}}
 	if errs := Check(texModule("rgba16float", store)); len(errs) != 0 {
 		t.Fatalf("valid texture module rejected:\n%v", Errors(errs))

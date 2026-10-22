@@ -159,3 +159,30 @@ func ScaleBias() *Module {
 		}},
 	}
 }
+
+// TextureFill returns a kernel that writes vec4(x, y, 0.5, 1.0) to every texel
+// of a 4x4 write-only storage texture `disp` (group 0, binding 2) of the given
+// format, one invocation per texel (workgroup 16). It exercises textureStore on
+// every backend; dispatching more than 16 invocations writes out of range, which
+// WebGPU drops.
+func TextureFill(format string) *Module {
+	return &Module{
+		Bindings: []Binding{
+			{Group: 0, Binding: 2, Space: Storage, Access: Write, Name: "disp", Type: StorageTexture{Format: format}},
+		},
+		Kernels: []Kernel{{
+			Name:          "main",
+			WorkgroupSize: [3]int{16, 1, 1},
+			Builtins:      []Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: Vec{3, U32}}},
+			Body: []Stmt{
+				Let{Name: "x", Value: Binary{"%", Member{Name{"gid"}, "x"}, Lit{"4u"}}},
+				Let{Name: "y", Value: Binary{"/", Member{Name{"gid"}, "x"}, Lit{"4u"}}},
+				Do{Expr: Call{"textureStore", []Expr{
+					Name{"disp"},
+					Call{"vec2u", []Expr{Name{"x"}, Name{"y"}}},
+					Call{"vec4", []Expr{Call{"f32", []Expr{Name{"x"}}}, Call{"f32", []Expr{Name{"y"}}}, Lit{"0.5"}, Lit{"1.0"}}},
+				}}},
+			},
+		}},
+	}
+}

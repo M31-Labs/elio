@@ -61,3 +61,24 @@ func TestEmitCullStructure(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStorageTexture(t *testing.T) {
+	src, err := Emit(ir.TextureFill("rgba16float"))
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		"@group(0) @binding(2) var disp : texture_storage_2d<rgba16float, write>;",
+		"textureStore(disp, vec2<i32>(vec2<u32>(x, y)), vec4<f32>(f32(x), f32(y), 0.5, 1.0));",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("WGSL missing %q\n--- got ---\n%s", want, src)
+		}
+	}
+	for _, f := range []string{"rgba32float", "r32float"} {
+		s, _ := Emit(ir.TextureFill(f))
+		if !strings.Contains(s, "texture_storage_2d<"+f+", write>") {
+			t.Errorf("format %s not spelled:\n%s", f, s)
+		}
+	}
+}
