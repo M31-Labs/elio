@@ -28,6 +28,7 @@ func oceanKernels() []oceanKernel {
 	return []oceanKernel{
 		{"ocean_rng", stdlib.OceanRng, []string{"kernel void ocean_rng", "constant OceanRngParams&"}},
 		{"ocean_evolve", stdlib.OceanEvolve, []string{"kernel void ocean_evolve", "constant OceanEvolveParams&"}},
+		{"ocean_probe", stdlib.OceanProbe, []string{"kernel void ocean_probe", "constant OceanProbeParams&", "const device float4* disp0"}},
 		{"ocean_spectrum", stdlib.OceanSpectrum, []string{"kernel void ocean_spectrum", "constant OceanSpectrumParams&"}},
 	}
 }

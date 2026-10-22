@@ -43,6 +43,20 @@ func OceanEvolve() (*ir.Module, error) {
 	return parseOcean("ocean/evolve.elio", OceanEvolveSource, false)
 }
 
+// OceanProbeSource is the .elio source of ocean_probe: for up to 64 world
+// points it sums the cascades' displacement buffers by bilinear sampling,
+// inverts the horizontal displacement (two fixed-point and four Newton steps)
+// and writes (height, normal.x, normal.z, t). The source header documents the
+// expected buffer layout.
+//
+//go:embed ocean/probe.elio
+var OceanProbeSource string
+
+// OceanProbe builds the ocean_probe module from OceanProbeSource.
+func OceanProbe() (*ir.Module, error) {
+	return parseOcean("ocean/probe.elio", OceanProbeSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)
