@@ -25,12 +25,12 @@ func TestOceanKernelSetNames(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("kernels = %v", got)
 	}
-	for _, n := range []string{"ocean_assemble", "ocean_mip", "ocean_foam", "ocean_evolve", "fft_gather_64"} {
+	for _, n := range []string{"ocean_assemble", "ocean_mip", "ocean_foam", "ocean_evolve", "ocean_spectrum", "fft_gather_64"} {
 		if !gather[n] {
 			t.Errorf("%s should be a gather kernel", n)
 		}
 	}
-	if gather["fft_compute_64"] || gather["ocean_spectrum"] || gather["ocean_probe"] {
+	if gather["fft_compute_64"] || gather["ocean_probe"] {
 		t.Error("compute-only kernel marked gather")
 	}
 }
