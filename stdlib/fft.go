@@ -168,10 +168,12 @@ func FFT2DCompute(n int) (*ir.Module, error) {
 	lit := func(v int) ir.Expr { return fu(fmt.Sprintf("%du", v)) }
 	half := n / 2
 	j := fnm("j")
-	sh := func(i ir.Expr) ir.Expr { return fidx(fnm("buf"), i) }
 	data := func(i ir.Expr) ir.Expr { return fidx(fnm("data"), i) }
 
-	kernel := func(name string, addr func(pos ir.Expr) ir.Expr) ir.Kernel {
+	kernel := func(name, shName string, addr func(pos ir.Expr) ir.Expr) ir.Kernel {
+		// WGSL declares workgroup variables at module scope, so each kernel
+		// needs its own name for its shared array.
+		sh := func(i ir.Expr) ir.Expr { return fidx(fnm(shName), i) }
 		angle := fbin("/", fbin("*", fu(fftTwoPi), fcall("f32", fbin("*", fnm("p"), fnm("s")))), fcall("f32", lit(n)))
 		stage := append([]ir.Stmt{
 			ir.Let{Name: "s", Value: fbin("<<", fu("1u"), fnm("t"))},
@@ -195,7 +197,7 @@ func FFT2DCompute(n int) (*ir.Module, error) {
 				{Name: "lid", Builtin: "local_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}},
 				{Name: "wid", Builtin: "workgroup_id", Type: ir.Vec{N: 3, Elem: ir.U32}},
 			},
-			Shared: []ir.Shared{{Name: "buf", Type: ir.Array{Elem: fvec, Len: 2 * n}}},
+			Shared: []ir.Shared{{Name: shName, Type: ir.Array{Elem: fvec, Len: 2 * n}}},
 			Body: []ir.Stmt{
 				ir.Let{Name: "j", Value: fmem(fnm("lid"), "x")},
 				ir.Let{Name: "line", Value: fmem(fnm("wid"), "x")},
@@ -219,8 +221,8 @@ func FFT2DCompute(n int) (*ir.Module, error) {
 			{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.ReadWrite, Name: "data", Type: ir.Array{Elem: fvec}},
 		},
 		Kernels: []ir.Kernel{
-			kernel("fft_rows", func(pos ir.Expr) ir.Expr { return fbin("+", fbin("*", line, lit(n)), pos) }),
-			kernel("fft_cols", func(pos ir.Expr) ir.Expr { return fbin("+", fbin("*", pos, lit(n)), line) }),
+			kernel("fft_rows", "rows_buf", func(pos ir.Expr) ir.Expr { return fbin("+", fbin("*", line, lit(n)), pos) }),
+			kernel("fft_cols", "cols_buf", func(pos ir.Expr) ir.Expr { return fbin("+", fbin("*", pos, lit(n)), line) }),
 		},
 	}, nil
 }
