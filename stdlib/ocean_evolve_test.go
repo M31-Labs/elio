@@ -75,7 +75,7 @@ func runOceanEvolveWith(t *testing.T, s oceanSpec, h0 [][]float64, omega []float
 	}
 	mem := &run.Memory{Vars: map[string]any{
 		"ev": map[string]any{"n": int64(n), "_pad0": int64(0), "_pad1": int64(0), "_pad2": int64(0),
-			"t": tm, "tile": s.tile, "loop": s.loop, "_pad4": 0.0},
+			"t": tm, "tile": s.tile, "loopPeriod": s.loop, "_pad4": 0.0},
 		"h0": in, "omega": omega, "outA": outA, "outB": outB,
 	}}
 	if err := run.RunWith(m, "ocean_evolve", n*n, mem, opts); err != nil {

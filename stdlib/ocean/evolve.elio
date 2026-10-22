@@ -9,7 +9,7 @@
 //   h(k, t) = h0(k) e^{+i w t} + conj h0(-k) e^{-i w t},   w = omega, t seconds
 //
 // h(-k, t) = conj h(k, t), so every field below is Hermitian and its inverse
-// FFT is real. omega is quantized to whole cycles per `loop` seconds (default 1000),
+// FFT is real. omega is quantized to whole cycles per `loopPeriod` seconds (default 1000),
 // so the field repeats with that period: the host passes t mod loop and f32 time
 // never grows. Any t works in float64.
 //
@@ -45,7 +45,7 @@ struct OceanEvolveParams {
   _pad2: u32;
   t: f32;
   tile: f32;
-  loop: f32;
+  loopPeriod: f32;
   _pad4: f32;
 }
 
@@ -79,7 +79,7 @@ struct OceanEvolveParams {
   // integer (m < 3100 and t1 < 1000 stay under 2^24), reduce it modulo loop
   // exactly, then add m t2 (below 3100 s). Needs an integer-valued loop;
   // the phase error stays near 1e-6 rad.
-  var tloop = ev.loop;
+  var tloop = ev.loopPeriod;
   if tloop <= 0.0 { tloop = 1000.0; }
   let mcycles = floor(omega[i] * tloop / 6.283185307179586 + 0.5);
   let t1 = floor(ev.t);
