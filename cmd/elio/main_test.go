@@ -207,3 +207,22 @@ func TestEmitTSOceanSet(t *testing.T) {
 		t.Errorf("missing --set: want exit 2, got %d", code)
 	}
 }
+
+func TestEmitTSOceanGlobal(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"emit", "ts", "--set", "ocean", "--global", "__gosx_scene3d_elio_ocean"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"window.__gosx_scene3d_elio_ocean = deepFreeze({", "oceanMip: {", "fftGather256: {", "// sha256: "} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	if strings.Contains(got, "export ") {
+		t.Error("global form must not use ES exports")
+	}
+	if code := run([]string{"emit", "ts", "--set", "ocean", "--global", "a b"}, io.Discard, io.Discard); code != 1 {
+		t.Errorf("bad global name: want exit 1, got %d", code)
+	}
+}

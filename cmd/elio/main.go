@@ -3,6 +3,7 @@
 //
 //	elio emit <wgsl|glsl|metal> <file.elio>   # emit shader source to stdout
 //	elio emit ts --set ocean                  # TypeScript module of the ocean kernels
+//	elio emit ts --set ocean --global NAME    # the same as a classic script assigning window.NAME
 //	elio check <file.elio>                    # parse-check; prints "ok" or errors
 package main
 
@@ -25,8 +26,12 @@ import (
 const version = "v0.4.3+ocean"
 
 func runEmitTS(args []string, stdout, stderr io.Writer) int {
+	global := ""
+	if len(args) == 4 && args[2] == "--global" {
+		global, args = args[3], args[:2]
+	}
 	if len(args) != 2 || args[0] != "--set" {
-		fmt.Fprintln(stderr, "usage: elio emit ts --set ocean")
+		fmt.Fprintln(stderr, "usage: elio emit ts --set ocean [--global NAME]")
 		return 2
 	}
 	var set ts.KernelSet
@@ -40,7 +45,7 @@ func runEmitTS(args []string, stdout, stderr io.Writer) int {
 	}
 	if err == nil {
 		var out string
-		if out, err = ts.Emit(set, ts.Meta{Version: version}); err == nil {
+		if out, err = ts.Emit(set, ts.Meta{Version: version, Global: global}); err == nil {
 			fmt.Fprint(stdout, out)
 			return 0
 		}
@@ -51,7 +56,8 @@ func runEmitTS(args []string, stdout, stderr io.Writer) int {
 
 const usage = `usage:
   elio emit <wgsl|glsl|metal> <file.elio>   emit shader source to stdout
-  elio emit ts --set ocean                  emit a TypeScript module of a kernel set
+  elio emit ts --set ocean [--global NAME]  emit a TypeScript module of a kernel set
+                                            (--global: a classic script that assigns window.NAME)
   elio check <file.elio>                    parse + semantic-check the source
   elio graph [--format json|dot] <file.elio>
   elio kernels [--target wgsl|glsl|metal] [--out dir] [--validate] <file.elio>
