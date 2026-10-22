@@ -80,6 +80,20 @@ func OceanMip() (*ir.Module, error) {
 	return parseOcean("ocean/mip.elio", OceanMipSource, false)
 }
 
+// OceanFoamSource is the .elio source of ocean_foam: persistent crest foam on a
+// toroidal state buffer, with wrap-in clearing, decay and injection from the
+// Jacobian summed over cascades. The source header documents the toroidal
+// layout and the host inputs. It is gather-compatible (one f32 buffer and one
+// RGBA16F texture).
+//
+//go:embed ocean/foam.elio
+var OceanFoamSource string
+
+// OceanFoam builds the ocean_foam module from OceanFoamSource.
+func OceanFoam() (*ir.Module, error) {
+	return parseOcean("ocean/foam.elio", OceanFoamSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)
