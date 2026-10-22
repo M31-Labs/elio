@@ -43,3 +43,33 @@ func TestEmitCullMetal(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitStorageTexture(t *testing.T) {
+	src, err := Emit(ir.TextureFill("rgba16float"))
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		"texture2d<float, access::write> disp [[texture(0)]]",
+		"disp.write(float4(float(x), float(y), 0.5, 1.0), uint2(uint2(x, y)));",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("MSL missing %q\n--- got ---\n%s", want, src)
+		}
+	}
+	// Textures count separately from buffers: a buffer before the texture keeps
+	// buffer(0), and the texture is still texture(0).
+	m := ir.TextureFill("r32float")
+	m.Bindings = append([]ir.Binding{{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.ReadWrite, Name: "buf", Type: ir.Array{Elem: ir.F32}}}, m.Bindings...)
+	src, _ = Emit(m)
+	for _, want := range []string{"device float* buf [[buffer(0)]]", "disp [[texture(0)]]"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("MSL missing %q\n%s", want, src)
+		}
+	}
+	m.Kernels[0].Body = append(m.Kernels[0].Body, ir.Let{Name: "d", Value: ir.Call{Func: "textureDimensions", Args: []ir.Expr{ir.Name{Name: "disp"}}}})
+	src, _ = Emit(m)
+	if !strings.Contains(src, "uint2(disp.get_width(), disp.get_height())") {
+		t.Errorf("textureDimensions not lowered:\n%s", src)
+	}
+}
