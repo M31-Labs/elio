@@ -6,7 +6,12 @@
 //
 // Inputs from ocean_spectrum: h0[i] = (h0(k), conj h0(-k)) and omega[i].
 //
-//   h(k, t) = h0(k) e^{+i w t} + conj h0(-k) e^{-i w t},   w = omega, t seconds
+//   h(k, t) = h0(k) e^{-i w t} + conj h0(-k) e^{+i w t},   w = omega, t seconds
+//
+// With the inverse FFT convention e^{+i k.x} below, the h0(k) term has phase
+// k.x - w t, so it travels toward +k. ocean_spectrum puts the energy of h0(k) at
+// k along windDir, so the water travels toward windDir, the direction of
+// Scene3D's windDirection.
 //
 // h(-k, t) = conj h(k, t), so every field below is Hermitian and its inverse
 // FFT is real. omega is quantized to whole cycles per `loopPeriod` seconds (default 1000),
@@ -92,9 +97,9 @@ struct OceanEvolveParams {
   let phase = 6.283185307179586 * (cyc - floor(cyc));
   let cs = cos(phase);
   let sn = sin(phase);
-  // h = (x + i y)(cs + i sn) + (z + i w)(cs - i sn)
-  let hr = spec.x * cs - spec.y * sn + spec.z * cs + spec.w * sn;
-  let hi = spec.x * sn + spec.y * cs + spec.w * cs - spec.z * sn;
+  // h = (x + i y)(cs - i sn) + (z + i w)(cs + i sn)
+  let hr = spec.x * cs + spec.y * sn + spec.z * cs - spec.w * sn;
+  let hi = spec.y * cs - spec.x * sn + spec.w * cs + spec.z * sn;
 
   // Each field as (re, im): a real factor times h, or i times a real factor times h.
   let ux = kx * inv;
