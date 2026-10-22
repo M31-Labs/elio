@@ -9,11 +9,14 @@ import (
 	"m31labs.dev/elio/sema"
 )
 
-// probeCascade is one cascade's displacement buffer as the probe reads it:
-// n*n vec4 in natural order, (Dx, Dy, Dz, dDx/dz) already scaled by choppiness.
+// probeCascade is one cascade. raw is the post-FFT buffer A the probe reads:
+// n*n vec4 in natural order, (Dy, Dx, Dz, dDy/dx), NOT scaled by choppiness.
+// d is the reference's view of it, (Dx, Dy, Dz, dDy/dx) with lambda applied to
+// Dx and Dz, which the kernel must reproduce from raw and the uniform lambda.
 type probeCascade struct {
 	n    int
 	tile float64
+	raw  [][4]float64
 	d    [][4]float64
 }
 
@@ -105,18 +108,20 @@ func oceanProbeCascades(t *testing.T, n int, tm, lambda float64) []probeCascade 
 		s.seed = 3
 		h0, omega := runOceanSpectrum(t, s)
 		f := runOceanEvolve(t, s, h0, omega, tm)
-		pc := probeCascade{n: n, tile: s.tile, d: make([][4]float64, n*n)}
+		pc := probeCascade{n: n, tile: s.tile, raw: make([][4]float64, n*n), d: make([][4]float64, n*n)}
 		for i := range pc.d {
-			pc.d[i] = [4]float64{lambda * f[1][i], f[0][i], lambda * f[2][i], lambda * f[7][i]}
+			pc.raw[i] = [4]float64{f[0][i], f[1][i], f[2][i], f[3][i]}
+			pc.d[i] = [4]float64{lambda * f[1][i], f[0][i], lambda * f[2][i], f[3][i]}
 		}
 		cs = append(cs, pc)
 	}
 	return cs
 }
 
-func TestOceanProbeMatchesReference(t *testing.T) {
-	const n, lambda, tm, step = 64, 0.6, 2.5, 0.25
-	cs := oceanProbeCascades(t, n, tm, lambda)
+// runOceanProbe runs the kernel over pts with the cascades' raw buffers and the
+// choppiness lambda in the uniform, and returns the out buffer.
+func runOceanProbe(t *testing.T, cs []probeCascade, lambda, tm, step float64, pts []any) []any {
+	t.Helper()
 	m, err := OceanProbe()
 	if err != nil {
 		t.Fatal(err)
@@ -124,17 +129,13 @@ func TestOceanProbeMatchesReference(t *testing.T) {
 	if errs := sema.Check(m); len(errs) != 0 {
 		t.Fatalf("sema: %v", sema.Errors(errs))
 	}
-	r := rand.New(rand.NewSource(42))
-	const count = 64
-	pts := make([]any, count)
-	for i := range pts {
-		pts[i] = []float64{r.Float64()*4000 - 2000, r.Float64()*4000 - 2000, 0, 0}
-	}
+	count := len(pts)
 	bufs := make([]any, 4)
 	for c := range bufs {
+		n := cs[c].n
 		b := make([]any, n*n)
 		for i := range b {
-			b[i] = []float64{cs[c].d[i][0], cs[c].d[i][1], cs[c].d[i][2], cs[c].d[i][3]}
+			b[i] = []float64{cs[c].raw[i][0], cs[c].raw[i][1], cs[c].raw[i][2], cs[c].raw[i][3]}
 		}
 		bufs[c] = b
 	}
@@ -143,7 +144,7 @@ func TestOceanProbeMatchesReference(t *testing.T) {
 		out[i] = []float64{9, 9, 9, 9}
 	}
 	u := map[string]any{"count": int64(count), "cascades": int64(4), "_pad0": int64(0), "_pad1": int64(0),
-		"t": tm, "normalStep": step, "_pad2": 0.0, "_pad3": 0.0}
+		"t": tm, "normalStep": step, "lambda": lambda, "_pad3": 0.0}
 	for c := 0; c < 4; c++ {
 		u[probeField("n", c)] = int64(cs[c].n)
 		u[probeField("size", c)] = cs[c].tile
@@ -154,6 +155,19 @@ func TestOceanProbeMatchesReference(t *testing.T) {
 	if err := run.Run(m, "ocean_probe", count, mem); err != nil {
 		t.Fatal(err)
 	}
+	return out
+}
+
+func TestOceanProbeMatchesReference(t *testing.T) {
+	const n, lambda, tm, step = 64, 0.6, 2.5, 0.25
+	cs := oceanProbeCascades(t, n, tm, lambda)
+	r := rand.New(rand.NewSource(42))
+	const count = 64
+	pts := make([]any, count)
+	for i := range pts {
+		pts[i] = []float64{r.Float64()*4000 - 2000, r.Float64()*4000 - 2000, 0, 0}
+	}
+	out := runOceanProbe(t, cs, lambda, tm, step, pts)
 	var worstH, worstN, worstConv, maxShift float64
 	var converged int
 	for i := 0; i < count; i++ {
@@ -214,3 +228,37 @@ func TestOceanProbeMatchesReference(t *testing.T) {
 }
 
 func probeField(prefix string, c int) string { return prefix + string(rune('0'+c)) }
+
+// TestOceanProbeAppliesLambda checks that the kernel scales Dx and Dz by the
+// uniform lambda, not the host: at lambda 0 the probe reads the height at the
+// query point itself (no inversion), and the same raw buffers at lambda 0.6 give
+// the reference answer for lambda 0.6.
+func TestOceanProbeAppliesLambda(t *testing.T) {
+	const n, tm, step = 64, 2.5, 0.25
+	cs := oceanProbeCascades(t, n, tm, 0) // d holds lambda 0
+	pts := []any{[]float64{123.4, -567.8, 0, 0}, []float64{-1500.25, 800.5, 0, 0}}
+	out := runOceanProbe(t, cs, 0, tm, step, pts)
+	for i, p := range pts {
+		q := p.([]float64)
+		plain, _, _ := probeSum(cs, q[0], q[1])
+		if got := out[i].([]float64)[0]; math.Abs(got-plain[1]) > 1e-6 {
+			t.Errorf("lambda 0, point %d: height %.9g, want the undisplaced sum of Dy %.9g", i, got, plain[1])
+		}
+	}
+	// The same raw buffers with lambda 0.6 match a reference built with 0.6.
+	const lambda = 0.6
+	for _, c := range cs {
+		for i := range c.d {
+			c.d[i][0], c.d[i][2] = lambda*c.raw[i][1], lambda*c.raw[i][2]
+		}
+	}
+	out = runOceanProbe(t, cs, lambda, tm, step, pts)
+	for i, p := range pts {
+		q := p.([]float64)
+		want := probeRef(cs, q[0], q[1], step)
+		g := out[i].([]float64)
+		if math.Abs(g[0]-want[0]) > 1e-6 || math.Abs(g[1]-want[1]) > 1e-6 || math.Abs(g[2]-want[2]) > 1e-6 {
+			t.Errorf("lambda %g, point %d: got (%g, %g, %g), want %v", lambda, i, g[0], g[1], g[2], want)
+		}
+	}
+}
