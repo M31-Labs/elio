@@ -48,9 +48,9 @@ type swellPreset struct {
 
 var swellPresets = []swellPreset{
 	{Name: "calm", WindSpeed: 3, Fetch: 30, Gamma: 3.3, Spread: 16, Swell: 0.1, Seed: 1, WindDirection: 0},
-	{Name: "moderate", WindSpeed: 9, Fetch: 300, Gamma: 3.3, Spread: 8, Swell: 0.15, Seed: 1, WindDirection: 30},
-	{Name: "rough", WindSpeed: 13, Fetch: 200, Gamma: 3.3, Spread: 6, Swell: 0.25, Seed: 1, WindDirection: 200},
-	{Name: "storm", WindSpeed: 22, Fetch: 250, Gamma: 2, Spread: 4, Swell: 0.35, Seed: 1, WindDirection: 300},
+	{Name: "moderate", WindSpeed: 7, Fetch: 100, Gamma: 3.3, Spread: 8, Swell: 0.15, Seed: 1, WindDirection: 30},
+	{Name: "rough", WindSpeed: 11, Fetch: 200, Gamma: 3.3, Spread: 6, Swell: 0.25, Seed: 1, WindDirection: 200},
+	{Name: "storm", WindSpeed: 20, Fetch: 250, Gamma: 2, Spread: 4, Swell: 0.35, Seed: 1, WindDirection: 300},
 }
 
 const swellCount = 24
