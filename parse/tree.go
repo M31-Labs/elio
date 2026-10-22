@@ -119,6 +119,12 @@ func scalarType(name string) ir.Type {
 	case "atomic_i32":
 		return ir.Atomic{Elem: ir.I32}
 	}
+	if f, ok := strings.CutPrefix(name, "tex2d_"); ok {
+		switch f {
+		case "rgba16float", "rgba32float", "r32float":
+			return ir.StorageTexture{Format: f}
+		}
+	}
 	return ir.Named{Name: name}
 }
 
@@ -160,6 +166,8 @@ func (w *treeWalker) binding(n *gts.Node) (ir.Binding, error) {
 				out.Access = ir.Read
 			case "read_write":
 				out.Access = ir.ReadWrite
+			case "write":
+				out.Access = ir.Write
 			}
 		}
 	default:
@@ -247,7 +255,7 @@ func (w *treeWalker) block(n *gts.Node) ([]ir.Stmt, error) {
 // `statement` supertype is elided and the concrete node appears directly).
 func (w *treeWalker) maybeStmt(n *gts.Node) (func() (ir.Stmt, error), bool) {
 	switch w.Type(n) {
-	case "let_stmt", "var_stmt", "return_stmt", "break_stmt", "barrier_stmt", "if_stmt", "for_stmt", "while_stmt", "assign_stmt":
+	case "let_stmt", "var_stmt", "return_stmt", "break_stmt", "barrier_stmt", "if_stmt", "for_stmt", "while_stmt", "assign_stmt", "call_stmt":
 		return func() (ir.Stmt, error) { return w.stmt(n) }, true
 	}
 	return nil, false
@@ -285,6 +293,12 @@ func (w *treeWalker) stmt(n *gts.Node) (ir.Stmt, error) {
 		return ir.While{Cond: cond, Body: body, Span: w.span(n)}, nil
 	case "assign_stmt":
 		return w.assignInner(n.NamedChild(0))
+	case "call_stmt":
+		e, err := w.expr(n.NamedChild(0))
+		if err != nil {
+			return nil, err
+		}
+		return ir.Do{Expr: e, Span: w.span(n)}, nil
 	}
 	return nil, fmt.Errorf("parse: unexpected statement node %q", w.Type(n))
 }
