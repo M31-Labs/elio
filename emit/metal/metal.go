@@ -62,8 +62,14 @@ func emitKernel(b *strings.Builder, m *ir.Module, k ir.Kernel) error {
 	lengths := lengthParams(k.Body)
 
 	var args []string
-	buf := 0
+	buf, tex := 0, 0
 	for _, bnd := range m.Bindings {
+		if _, ok := bnd.Type.(ir.StorageTexture); ok {
+			// Textures have their own index space, separate from buffers.
+			args = append(args, fmt.Sprintf("texture2d<float, access::write> %s [[texture(%d)]]", bnd.Name, tex))
+			tex++
+			continue
+		}
 		args = append(args, bindingArg(bnd, buf))
 		buf++
 	}
@@ -308,6 +314,15 @@ func call(c ir.Call) string {
 	case "atomicAdd":
 		if len(c.Args) == 2 {
 			return fmt.Sprintf("atomic_fetch_add_explicit(%s, %s, memory_order_relaxed)", expr(c.Args[0]), expr(c.Args[1]))
+		}
+	case "textureStore":
+		if len(c.Args) == 3 {
+			return fmt.Sprintf("%s.write(%s, uint2(%s))", expr(c.Args[0]), expr(c.Args[2]), expr(c.Args[1]))
+		}
+	case "textureDimensions":
+		if len(c.Args) == 1 {
+			t := expr(c.Args[0])
+			return fmt.Sprintf("uint2(%s.get_width(), %s.get_height())", t, t)
 		}
 	case "select":
 		// WGSL select(falseVal, trueVal, cond) → MSL ternary (cond ? trueVal : falseVal).

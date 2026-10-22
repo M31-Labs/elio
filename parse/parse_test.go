@@ -52,3 +52,29 @@ func TestParseEqualsHandBuilt(t *testing.T) {
 		t.Errorf("parsed IR emits differently than hand-built IR\n--- parsed ---\n%s\n--- hand ---\n%s", fromParse, fromHand)
 	}
 }
+
+func TestParseStorageTextureBinding(t *testing.T) {
+	for _, format := range []string{"rgba16float", "rgba32float", "r32float"} {
+		src := "@group(0) @binding(2) storage write disp: tex2d_" + format + ";\n" +
+			"@workgroup(16) kernel main(gid: global_invocation_id) {\n" +
+			"  textureStore(disp, vec2u(gid.x, 0u), vec4(1.0, 0.0, 0.0, 1.0));\n}\n"
+		mod, err := Parse(src)
+		if err != nil {
+			t.Fatalf("%s: Parse: %v", format, err)
+		}
+		if len(mod.Bindings) != 1 {
+			t.Fatalf("%s: got %d bindings", format, len(mod.Bindings))
+		}
+		if body := mod.Kernels[0].Body; len(body) != 1 {
+			t.Fatalf("%s: want 1 statement, got %d", format, len(body))
+		} else if do, ok := body[0].(ir.Do); !ok {
+			t.Fatalf("%s: statement is %T, want ir.Do", format, body[0])
+		} else if call, ok := do.Expr.(ir.Call); !ok || call.Func != "textureStore" || len(call.Args) != 3 {
+			t.Fatalf("%s: bad call %+v", format, do.Expr)
+		}
+		want := ir.Binding{Group: 0, Binding: 2, Space: ir.Storage, Access: ir.Write, Name: "disp", Type: ir.StorageTexture{Format: format}}
+		if mod.Bindings[0] != want {
+			t.Errorf("%s: binding = %+v, want %+v", format, mod.Bindings[0], want)
+		}
+	}
+}

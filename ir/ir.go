@@ -39,12 +39,17 @@ type Atomic struct{ Elem Scalar }
 // Named refers to a declared Struct by name.
 type Named struct{ Name string }
 
-func (Scalar) isType() {}
-func (Vec) isType()    {}
-func (Mat) isType()    {}
-func (Array) isType()  {}
-func (Atomic) isType() {}
-func (Named) isType()  {}
+// StorageTexture is a 2D write-only storage texture with a fixed texel format.
+// Format is "rgba16float", "rgba32float" or "r32float".
+type StorageTexture struct{ Format string }
+
+func (Scalar) isType()         {}
+func (Vec) isType()            {}
+func (Mat) isType()            {}
+func (Array) isType()          {}
+func (Atomic) isType()         {}
+func (Named) isType()          {}
+func (StorageTexture) isType() {}
 
 // Canonical scalars.
 var (
@@ -80,6 +85,8 @@ type Access string
 const (
 	Read      Access = "read"
 	ReadWrite Access = "read_write"
+	// Write is only valid with a StorageTexture binding.
+	Write Access = "write"
 )
 
 // Binding is a module-level resource (var<...>): a uniform block or storage

@@ -73,3 +73,26 @@ func TestGLSLValidatesToSPIRV(t *testing.T) {
 		t.Errorf("glslang reported issues:\n%s", out)
 	}
 }
+
+func TestEmitStorageTexture(t *testing.T) {
+	for format, glf := range map[string]string{"rgba16float": "rgba16f", "rgba32float": "rgba32f", "r32float": "r32f"} {
+		src, err := Emit(ir.TextureFill(format))
+		if err != nil {
+			t.Fatalf("Emit: %v", err)
+		}
+		for _, want := range []string{
+			"layout(" + glf + ", binding = 2) uniform writeonly image2D disp;",
+			"imageStore(disp, ivec2(uvec2(x, y)), vec4(float(x), float(y), 0.5, 1.0));",
+		} {
+			if !strings.Contains(src, want) {
+				t.Errorf("%s: GLSL missing %q\n--- got ---\n%s", format, want, src)
+			}
+		}
+	}
+	m := ir.TextureFill("rgba16float")
+	m.Kernels[0].Body = append(m.Kernels[0].Body, ir.Let{Name: "d", Value: ir.Call{Func: "textureDimensions", Args: []ir.Expr{ir.Name{Name: "disp"}}}})
+	src, _ := Emit(m)
+	if !strings.Contains(src, "uvec2 d = uvec2(imageSize(disp));") {
+		t.Errorf("textureDimensions not lowered:\n%s", src)
+	}
+}

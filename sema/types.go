@@ -148,6 +148,8 @@ func typeName(t ir.Type) string {
 		return "atomic_" + t.Elem.Name
 	case ir.Named:
 		return t.Name
+	case ir.StorageTexture:
+		return "tex2d_" + t.Format
 	}
 	return "?"
 }
