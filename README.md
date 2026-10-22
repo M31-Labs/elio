@@ -44,6 +44,7 @@ elio emit wgsl  kernel.elio    # WGSL to stdout
 elio emit glsl  kernel.elio    # GLSL #version 450 compute
 elio emit metal kernel.elio    # Metal MSL
 elio check      kernel.elio    # parse-check only
+elio emit ts --set ocean       # TypeScript module of the ocean kernels
 ```
 
 ## The `.elio` language
@@ -164,6 +165,49 @@ void main() {
 The emitted source is checked with `glslangValidator` in `conformance/`. It has
 not been run on a WebGL2 device.
 
+## Textures, FFT, ocean kernels and `emit ts`
+
+**Storage textures.** A write-only 2D texture binds as
+`@group(0) @binding(3) storage write dst: tex2d_rgba16float;` (also
+`tex2d_rgba32float` and `tex2d_r32float`). A kernel writes it with
+`textureStore(dst, vec2u(x, y), vec4(...))` and reads its size with
+`textureDimensions`. The interpreter holds one in a `run.Texture` and rounds
+each store to the format's precision. A gather kernel treats a texture it
+writes at `vec2u(i % W, i / W)` as a color attachment (see below).
+
+**FFT.** `stdlib.FFT2DCompute(n)` builds a 2D complex FFT as two compute
+kernels, `fft_rows` and `fft_cols`, that use workgroup memory (`n` from 4 to
+256, a power of two). `stdlib.FFT2DGather(n)` builds one Stockham stage,
+`fft_stage`, in the gather profile: the host runs log2(n) passes per axis and
+swaps the source and destination textures between passes.
+
+**Gather outputs.** `gather.Emit` returns the GLSL ES source and a `Layout`
+that names each input sampler, each output color attachment (with its texture
+format) and each std140 uniform block. At most 32 bytes per pixel are written
+across all outputs.
+
+**Ocean kernels.** `stdlib` holds six kernels for an FFT ocean: `ocean_spectrum`
+(JONSWAP spectrum for one cascade), `ocean_evolve` (advance the spectrum to a
+time), `ocean_assemble` (choppiness, displacement and slope textures),
+`ocean_mip` (box-filtered mip levels), `ocean_foam` (persistent crest foam) and
+`ocean_probe` (height and normal at up to 64 world points). Each source file
+under `stdlib/ocean/` documents its model, units and buffer layout.
+
+**Float32 mode.** `run.RunWith(..., run.Options{Float32: true})` rounds every
+float result to float32, so the interpreter matches a GPU's `f32` arithmetic up
+to the accuracy of its math functions. The default stays float64.
+
+**`elio emit ts`.** `elio emit ts --set ocean` writes one TypeScript module to
+stdout. For each kernel it exports `<name>WGSL`, `<name>Entry`,
+`<name>Workgroup`, `<name>Bindings` and `<name>Uniforms` (field names, types,
+byte offsets and struct size under WGSL layout rules). A gather kernel also
+exports `<name>GLSL` and `<name>GatherLayout`, plus `<name>UniformsStd140` when
+the std140 layout differs from the WGSL one. The header records the Elio
+version and a SHA-256 of the sources, so a checked-in copy shows when it is
+stale. The library entry point is `emit/ts.Emit`; `stdlib.OceanKernelSet`
+lists the kernels. The emitted WGSL passes `naga` and the GLSL passes
+`glslangValidator`; neither has been run in a browser.
+
 ## Layout
 
 | Path | Role |
@@ -172,6 +216,7 @@ not been run on a WebGL2 device.
 | `parse/` | `.elio` front-end (lexer + recursive-descent parser) |
 | `emit/wgsl/`, `emit/glsl/`, `emit/metal/` | backend emitters |
 | `emit/gather/` | GLSL ES 3.00 fragment emitter for gather kernels (WebGL2) |
+| `emit/ts/` | TypeScript module emitter for kernel sets |
 | `run/` | scalar CPU interpreter |
 | `conformance/` | cross-backend validation (naga + glslang + CPU) |
 | `cmd/elio/` | the `elio` CLI |
