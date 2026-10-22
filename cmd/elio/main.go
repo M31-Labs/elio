@@ -2,6 +2,7 @@
 // a backend shader, or check that it parses.
 //
 //	elio emit <wgsl|glsl|metal> <file.elio>   # emit shader source to stdout
+//	elio emit ts --set ocean                  # TypeScript module of the ocean kernels
 //	elio check <file.elio>                    # parse-check; prints "ok" or errors
 package main
 
@@ -12,14 +13,45 @@ import (
 
 	"m31labs.dev/elio/emit/glsl"
 	"m31labs.dev/elio/emit/metal"
+	"m31labs.dev/elio/emit/ts"
 	"m31labs.dev/elio/emit/wgsl"
 	"m31labs.dev/elio/ir"
 	"m31labs.dev/elio/parse"
 	"m31labs.dev/elio/sema"
+	"m31labs.dev/elio/stdlib"
 )
+
+// version names this Elio build in generated headers.
+const version = "v0.4.3+ocean"
+
+func runEmitTS(args []string, stdout, stderr io.Writer) int {
+	if len(args) != 2 || args[0] != "--set" {
+		fmt.Fprintln(stderr, "usage: elio emit ts --set ocean")
+		return 2
+	}
+	var set ts.KernelSet
+	var err error
+	switch args[1] {
+	case "ocean":
+		set, err = stdlib.OceanKernelSet()
+	default:
+		fmt.Fprintf(stderr, "elio: unknown kernel set %q (want ocean)\n", args[1])
+		return 2
+	}
+	if err == nil {
+		var out string
+		if out, err = ts.Emit(set, ts.Meta{Version: version}); err == nil {
+			fmt.Fprint(stdout, out)
+			return 0
+		}
+	}
+	printCommandError(stderr, err)
+	return 1
+}
 
 const usage = `usage:
   elio emit <wgsl|glsl|metal> <file.elio>   emit shader source to stdout
+  elio emit ts --set ocean                  emit a TypeScript module of a kernel set
   elio check <file.elio>                    parse + semantic-check the source
   elio graph [--format json|dot] <file.elio>
   elio kernels [--target wgsl|glsl|metal] [--out dir] [--validate] <file.elio>
@@ -35,6 +67,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "emit":
+		if len(args) >= 2 && args[1] == "ts" {
+			return runEmitTS(args[2:], stdout, stderr)
+		}
 		if len(args) != 3 {
 			fmt.Fprintln(stderr, "usage: elio emit <wgsl|glsl|metal> <file.elio>")
 			return 2
