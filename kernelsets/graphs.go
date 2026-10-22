@@ -202,28 +202,26 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		// Inverse FFT of A and B.
 		fk := fmt.Sprintf("fft_compute_%d", nc)
 		gk := fmt.Sprintf("fft_gather_%d", nc)
-		for _, x := range []string{"A", "B"} {
-			main := name("fft"+x+"_", c)
-			if gpu {
+		if gpu {
+			for _, x := range []string{"A", "B"} {
 				for _, entry := range []string{"fft_rows", "fft_cols"} {
 					b.Pass(graph.Pass{Name: pre + "fft" + x + "." + entry, Type: "kernel", Kernel: fk, Entry: entry, When: "always",
-						Dispatch: &[3]int{nc, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: main}}})
+						Dispatch: &[3]int{nc, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: name("fft"+x+"_", c)}}})
 				}
-				continue
 			}
-			scratch := name("fft"+x+"2_", c)
-			stages := 0
-			for axis := 0; axis < 2; axis++ {
-				for s := 0; s < bitsLen(nc); s++ {
-					src, dst := main, scratch
-					if stages%2 == 1 {
-						src, dst = scratch, main
-					}
-					stages++
-					b.Pass(place(graph.Pass{Name: fmt.Sprintf("%sfft%s.axis%ds%d", pre, x, axis, s), Type: "kernel", Kernel: gk, Entry: "fft_stage", When: "always",
-						Bindings: []graph.Binding{{Name: "src", Resource: src}, {Name: "dst", Resource: dst}},
-						Uniforms: []graph.Uniform{b.Uniform(gk, "fft", map[string]any{"n": nc, "stage": s, "axis": axis})}}, gk, nc, nc))
+		} else {
+			// One stage per pass, rows then columns, A and B together; the
+			// buffers alternate with their scratch twins, which the repeat's
+			// swap expresses.
+			for axis, label := range []string{"rows", "cols"} {
+				var body []graph.Pass
+				for _, x := range []string{"A", "B"} {
+					body = append(body, place(graph.Pass{Name: x, Type: "kernel", Kernel: gk, Entry: "fft_stage", When: "always",
+						Bindings: []graph.Binding{{Name: "src", Resource: name("fft"+x+"_", c)}, {Name: "dst", Resource: name("fft"+x+"2_", c)}},
+						Uniforms: []graph.Uniform{b.Uniform(gk, "fft", map[string]any{"n": nc, "stage": ref("s"), "axis": axis})}}, gk, nc, nc))
 				}
+				b.Pass(graph.Pass{Name: pre + "fft." + label, Type: "repeat", Count: bitsLen(nc), Index: "s", When: "always",
+					Swap: [][2]string{{name("fftA_", c), name("fftA2_", c)}, {name("fftB_", c), name("fftB2_", c)}}, Body: body})
 			}
 		}
 

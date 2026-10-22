@@ -109,10 +109,18 @@ type Resource struct {
 	Feed string `json:"feed,omitempty"`
 }
 
-// Pass is a kernel pass or a mipmap pass.
+// Pass is a kernel pass, a mipmap pass or a repeat of other passes.
+//
+// A repeat runs Body Count times with the param named Index set to 0 to
+// Count-1 (body uniform values refer to it as "param:<Index>"), and after
+// each iteration swaps every pair in Swap (the names then refer to each
+// other's resources, as with Graph.FrameSwaps). A runner may expand a repeat
+// itself: Expand is the reference expansion, and Validate checks the
+// expansion. Swaps must cancel by the end of the pass list, so a frame ends
+// with every resource where it began (FrameSwaps aside).
 type Pass struct {
 	Name   string `json:"name"`
-	Type   string `json:"type"` // "kernel" or "mipmap"
+	Type   string `json:"type"` // "kernel", "mipmap" or "repeat"
 	Kernel string `json:"kernel,omitempty"`
 	Entry  string `json:"entry,omitempty"`
 	// When is "always", "param:<boolParam>" or "changed:<p1>,<p2>,...": the
@@ -124,6 +132,11 @@ type Pass struct {
 	Bindings []Binding `json:"bindings,omitempty"`
 	Uniforms []Uniform `json:"uniforms,omitempty"`
 	Resource string    `json:"resource,omitempty"` // mipmap: the texture
+
+	Count int         `json:"count,omitempty"` // repeat: iterations
+	Index string      `json:"index,omitempty"` // repeat: the iteration param
+	Swap  [][2]string `json:"swap,omitempty"`  // repeat: resource pairs swapped after each iteration
+	Body  []Pass      `json:"body,omitempty"`  // repeat: the passes to run
 }
 
 // Target is a WebGL2 pass's render size and the elio_width uniform.
@@ -142,7 +155,8 @@ type Binding struct {
 }
 
 // Uniform gives every field of a kernel's uniform struct a number or a
-// "param:<name>" reference.
+// "param:<name>" reference. Fields whose names start with "_pad" may be
+// omitted; the runner zero-fills them.
 type Uniform struct {
 	Name   string         `json:"name"`
 	Values map[string]any `json:"values"`

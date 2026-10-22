@@ -25,6 +25,8 @@ func numericType(t string) bool { return t == F32 || t == U32 || t == I32 }
 // Validate checks g against the kernels it may use and returns every problem
 // found, joined. The rules:
 //
+// Repeat passes are expanded first (Expand); the rules apply to the expansion.
+//
 //  1. Every kernel binding is bound exactly once, to a resource of a compatible
 //     kind, element type and format; every uniform block has one entry.
 //  2. A pass never reads a resource it writes (the same resource and mip
@@ -72,8 +74,14 @@ func (v *validator) run() {
 	}
 	v.checkParams()
 	v.checkResources()
+	flat, err := Expand(g)
+	if err != nil {
+		v.errs = append(v.errs, err)
+		flat = g
+		flat.Passes = nil
+	}
 	passNames := map[string]bool{}
-	for _, p := range g.Passes {
+	for _, p := range flat.Passes {
 		if passNames[p.Name] {
 			v.errf("duplicate pass name %q", p.Name)
 		}
@@ -87,8 +95,7 @@ func (v *validator) run() {
 			v.errf("swap %v names an unknown resource", s)
 			continue
 		}
-		a.Name, b.Name, a.Feed, b.Feed = "", "", "", ""
-		if a != b {
+		if !sameShape(a, b) {
 			v.errf("swap %v: the two resources differ in kind, type or size", s)
 		}
 	}
@@ -101,6 +108,12 @@ func (v *validator) run() {
 			v.errf("export %q: %q must be a texture resource (a buffer only on webgpu)", name, r)
 		}
 	}
+}
+
+// sameShape reports whether two resources hold the same kind of data.
+func sameShape(a, b Resource) bool {
+	a.Name, b.Name, a.Feed, b.Feed = "", "", "", ""
+	return a == b
 }
 
 // refName returns the param name of a "param:<name>" reference.
@@ -488,6 +501,9 @@ func (v *validator) checkUniform(p Pass, m *ir.Module, mb ir.Binding, u Uniform)
 		fields[f.Name] = ft
 		val, ok := u.Values[f.Name]
 		if !ok {
+			if strings.HasPrefix(f.Name, "_pad") {
+				continue
+			}
 			v.errf("pass %q: uniform %q has no value for field %q", p.Name, u.Name, f.Name)
 			continue
 		}

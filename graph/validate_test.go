@@ -21,12 +21,15 @@ func kernels(t *testing.T) []graph.Kernel {
 	must(t, err)
 	fc, err := stdlib.FFT2DCompute(64)
 	must(t, err)
+	fg, err := stdlib.FFT2DGather(64)
+	must(t, err)
 	ks = append(ks,
 		graph.Kernel{Name: "ocean_evolve", Entry: "ocean_evolve", Module: ev, Gather: true},
 		graph.Kernel{Name: "ocean_assemble", Entry: "ocean_assemble", Module: as, Gather: true},
 		graph.Kernel{Name: "ocean_mip", Entry: "ocean_mip", Module: mp, Gather: true},
 		graph.Kernel{Name: "ocean_spectrum", Entry: "ocean_spectrum", Module: sp},
 		graph.Kernel{Name: "fft_compute_64", Entry: "fft_rows", Module: fc},
+		graph.Kernel{Name: "fft_gather_64", Entry: "fft_stage", Module: fg, Gather: true},
 	)
 	return ks
 }

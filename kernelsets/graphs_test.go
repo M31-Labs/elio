@@ -57,8 +57,18 @@ func TestOceanGraphPassCounts(t *testing.T) {
 		"webgl2/low":    3 + 3 + 3*24 + 3 + 6 + 1 + 1,
 	}
 	for key, n := range want {
-		if got := len(gs[key].Passes); got != n {
-			t.Errorf("%s: %d passes, want %d", key, got, n)
+		flat, err := graph.Expand(gs[key])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := len(flat.Passes); got != n {
+			t.Errorf("%s: %d expanded passes, want %d", key, got, n)
+		}
+	}
+	// WebGL2's FFT stages are repeats: two per cascade, not 120 passes.
+	for _, key := range []string{"webgl2/high", "webgl2/medium", "webgl2/low"} {
+		if top := len(gs[key].Passes); top > 40 {
+			t.Errorf("%s: %d top-level passes; the FFT stages should be repeats", key, top)
 		}
 	}
 }

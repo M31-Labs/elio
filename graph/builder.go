@@ -182,9 +182,9 @@ func (b *Builder) Workgroups(kernel, entry string, elements int) *[3]int {
 	return nil
 }
 
-// Uniform returns the uniform entry for a kernel's uniform block. Padding
-// fields the caller omits (a name starting with "_", or "pad") get 0, so the
-// entry gives every field a value, as Validate requires.
+// Uniform returns the uniform entry for a kernel's uniform block. A field
+// named "pad" that the caller omits gets 0; fields starting "_pad" stay
+// omitted (the runner zero-fills them).
 func (b *Builder) Uniform(kernel, binding string, values map[string]any) Uniform {
 	u := Uniform{Name: binding, Values: map[string]any{}}
 	for k, v := range values {
@@ -204,7 +204,7 @@ func (b *Builder) Uniform(kernel, binding string, values map[string]any) Uniform
 				continue
 			}
 			for _, f := range s.Fields {
-				if _, set := u.Values[f.Name]; !set && (strings.HasPrefix(f.Name, "_") || f.Name == "pad") {
+				if _, set := u.Values[f.Name]; !set && f.Name == "pad" {
 					u.Values[f.Name] = 0
 				}
 			}

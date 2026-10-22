@@ -15,8 +15,12 @@ func TestBuilderBuildsAndFillsPadding(t *testing.T) {
 	b.Buffer("h0", "vec4<f32>", 4096, 0).Buffer("omega", "f32", 4096, 0)
 	b.Buffer("A", "vec4<f32>", 4096, 0).Buffer("B", "vec4<f32>", 4096, 0)
 	u := b.Uniform("ocean_evolve", "ev", map[string]any{"n": 64, "t": graph.Ref("t"), "tile": 250.0, "loopPeriod": 1000.0})
-	if u.Values["_pad0"] != 0 || u.Values["_pad4"] != 0 {
-		t.Fatalf("padding not filled: %v", u.Values)
+	if _, ok := u.Values["_pad0"]; ok {
+		t.Fatalf("_pad fields should stay omitted: %v", u.Values)
+	}
+	mu := b.Uniform("ocean_mip", "mip", map[string]any{"srcLevel": 0, "dstWidth": 4, "dstHeight": 4})
+	if mu.Values["pad"] != 0 {
+		t.Fatalf("pad not filled: %v", mu.Values)
 	}
 	b.Pass(graph.Pass{Name: "evolve", Type: "kernel", Kernel: "ocean_evolve", Entry: "ocean_evolve", When: "always",
 		Dispatch: b.Workgroups("ocean_evolve", "ocean_evolve", 4096),
