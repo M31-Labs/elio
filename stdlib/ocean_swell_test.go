@@ -21,14 +21,15 @@ import (
 // UPDATE_GOLDEN=1 regenerates the file here; copy it to GoSX afterwards.
 //
 // Each selected bin becomes a plane wave. With the inverse FFT convention
-// e^{+i k.x} and h(k,t) = h0(k) e^{+iwt} + m(k) e^{-iwt}, where m(k) = conj h0(-k)
-// is the (z, w) lane pair, the real height field is
+// e^{+ik.x} and h(k,t) = h0(k) e^{-iwt} + conj h0(-k) e^{+iwt}, the real height
+// field is
 //
-//	sum over all bins of 2 Re[ m(k) e^{i(k.x - w t)} ]
+//	sum over all bins of 2 Re[ h0(k) e^{i(k.x - w t)} ]
 //
-// so bin k is the wave y = A cos(k.x - w t + phase) travelling along k with
-// A = 2 |m(k)| and phase = arg m(k). TestOceanSwellWavesSumToField checks that
-// identity against a direct sum of the kernel's own h(k, t).
+// so bin k is the wave y = A cos(k.x - w t + phase) travelling toward +k with
+// A = 2 |h0(k)| and phase = arg h0(k), the (x, y) lane pair.
+// TestOceanSwellWavesSumToField checks that identity against a direct sum of the
+// kernel's own h(k, t).
 
 const swellGoldenPath = "ocean/testdata/swell-bins.json"
 
@@ -71,13 +72,9 @@ type swellGolden struct {
 }
 
 // elioDir converts a GoSX direction in degrees (0 toward +Z, positive toward
-// +X) to the kernel's windDir and swellDir uniforms, in radians measured from +x
-// toward +z. The kernel puts the energy of h0(k) at k parallel to the uniform,
-// and with h0(k) e^{+iwt} and e^{+ik.x} that term travels toward -k. So the
-// evolved field travels opposite to the uniform, and the host passes the
-// direction plus pi to make the water travel toward the authored direction.
-// (TestOceanSwellTravelsTowardAuthoredDirection checks this.)
-func elioDir(degrees float64) float64 { return -math.Pi/2 - degrees*math.Pi/180 }
+// +X) to the kernel's windDir and swellDir uniforms: the angle theta of the
+// direction the waves travel toward, vector (cos theta, sin theta) in (x, z).
+func elioDir(degrees float64) float64 { return math.Pi/2 - degrees*math.Pi/180 }
 
 func (p swellPreset) spec(cascade int) oceanSpec {
 	s := defaultSpec(cascade, 64)
@@ -95,7 +92,7 @@ func swellBins(t *testing.T, s oceanSpec) []swellBin {
 	for z := 0; z < s.n; z++ {
 		for x := 0; x < s.n; x++ {
 			g := h0[z*s.n+x]
-			if g[2] == 0 && g[3] == 0 {
+			if g[0] == 0 && g[1] == 0 {
 				continue
 			}
 			ix, iz := signedBin(x, s.n), signedBin(z, s.n)
@@ -103,8 +100,8 @@ func swellBins(t *testing.T, s oceanSpec) []swellBin {
 				Cascade: s.cascade, IX: ix, IZ: iz,
 				K:         dk * math.Sqrt(float64(ix*ix+iz*iz)),
 				Omega:     omega[z*s.n+x],
-				Amplitude: 2 * math.Hypot(g[2], g[3]),
-				Phase:     math.Atan2(g[3], g[2]),
+				Amplitude: 2 * math.Hypot(g[0], g[1]),
+				Phase:     math.Atan2(g[1], g[0]),
 			})
 		}
 	}
@@ -207,18 +204,18 @@ func TestOceanSwellWavesSumToField(t *testing.T) {
 				g := h0[zi*s.n+xi]
 				w := omega[zi*s.n+xi]
 				kx, kz := dk*float64(signedBin(xi, s.n)), dk*float64(signedBin(zi, s.n))
-				// h(k,t) = h0 e^{iwt} + m e^{-iwt}; field term Re[h e^{i k.x}].
+				// h(k,t) = h0 e^{-iwt} + m e^{+iwt}; field term Re[h e^{i k.x}].
 				ph := kx*x + kz*z
-				direct += (g[0]*math.Cos(ph+w*tm) - g[1]*math.Sin(ph+w*tm)) +
-					(g[2]*math.Cos(ph-w*tm) - g[3]*math.Sin(ph-w*tm))
+				direct += (g[0]*math.Cos(ph-w*tm) - g[1]*math.Sin(ph-w*tm)) +
+					(g[2]*math.Cos(ph+w*tm) - g[3]*math.Sin(ph+w*tm))
 			}
 		}
 		for _, b := range waves {
 			kx, kz := dk*float64(b.IX), dk*float64(b.IZ)
 			plane += b.Amplitude * math.Cos(kx*x+kz*z-b.Omega*tm+b.Phase)
 		}
-		// Bin k's h0(k) term is the mirror bin's m(-k) term conjugated, so every
-		// bin's m wave, with amplitude 2|m|, carries both halves.
+		// Bin k's m(k) term is the mirror bin's h0(-k) term conjugated, so every
+		// bin's h0 wave, with amplitude 2|h0|, carries both halves.
 		worst = math.Max(worst, math.Abs(direct-plane))
 		scale = math.Max(scale, math.Abs(direct))
 	}

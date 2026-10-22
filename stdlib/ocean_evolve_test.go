@@ -112,7 +112,7 @@ func directEvolve(s oceanSpec, h0 [][]float64, omega []float64, tm, px, pz float
 			kx, kz := dk*float64(ix), dk*float64(iz)
 			kk := math.Hypot(kx, kz)
 			w := omega[z*n+x]
-			h := complex(g[0], g[1])*cmplx.Exp(complex(0, w*tm)) + complex(g[2], g[3])*cmplx.Exp(complex(0, -w*tm))
+			h := complex(g[0], g[1])*cmplx.Exp(complex(0, -w*tm)) + complex(g[2], g[3])*cmplx.Exp(complex(0, w*tm))
 			e := cmplx.Exp(complex(0, kx*px+kz*pz))
 			he := h * e
 			ux, uz := kx/kk, kz/kk

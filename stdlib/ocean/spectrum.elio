@@ -42,7 +42,7 @@
 //   Amplitude. With dk = 2 pi / L and (z0, z1) independent standard normals,
 //     h0(k) = (z0 + i z1) sqrt(S(k)) dk / 2
 //   so E|h0(k)|^2 = S(k) dk^2 / 2 and the evolved bin h(k, t) =
-//   h0(k) e^{i w t} + conj h0(-k) e^{-i w t} has E|h|^2 = (S(k) + S(-k)) dk^2 / 2.
+//   h0(k) e^{-i w t} + conj h0(-k) e^{+i w t} has E|h|^2 = (S(k) + S(-k)) dk^2 / 2.
 //   The sum over all bins of E|h|^2 is the variance m0 = integral of S dk, and
 //   Hs = 4 sqrt(m0).
 //
