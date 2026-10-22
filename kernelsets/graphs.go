@@ -66,7 +66,8 @@ var spectrumParams = []string{"windSpeed", "fetch", "gamma", "spread", "swell", 
 // Params the app sets (value): windSpeed, fetch (km), gamma, spread, swell,
 // windDirDeg and swellDirDeg (degrees as Scene3D authors them), seed,
 // loopPeriod, lambda (choppiness), timeScale, driftX and driftZ (water drift,
-// m/s), foamTau, foamThreshold, foamGain, probeCount and probePoints (WebGPU).
+// m/s), foamTau, foamThreshold, foamGain, probeCount, probePoints, probeOriginX
+// and probeOriginZ (WebGPU; points are relative to probeOrigin, in world metres).
 // The graph derives the rest: windDir and swellDir (travel angles
 // pi/2 - deg pi/180), simTime (timeScale integrated), phaseTime (simTime mod
 // loopPeriod), waterX and waterZ (drift integrated), and the foam window's
@@ -113,6 +114,8 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 	b.Value("foamTau", graph.F32, 4).Value("foamThreshold", graph.F32, 0.9).Value("foamGain", graph.F32, 2)
 	b.Value("probeCount", graph.U32, 0)
 	if gpu {
+		// Probe points are relative to probeOrigin (world metres, set near the vessel).
+		b.Value("probeOriginX", graph.F32, 0).Value("probeOriginZ", graph.F32, 0)
 		b.BufferParam("probePoints", "vec4<f32>", probeMax)
 	}
 	b.Frame("dt", "dt").Frame("cameraX", "cameraX").Frame("cameraZ", "cameraZ")
@@ -139,6 +142,19 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		b.Expr("foamCell"+ax, graph.F32, "floor", ref("foamTexel"+ax))
 		b.Expr("foamOrigin"+ax, graph.I32, "sub", ref("foamCell"+ax), foamWidth/2)
 		b.Delta("foamShift"+ax, graph.I32, "foamOrigin"+ax)
+		// The foam kernel samples cascade c at the window origin wrapped into
+		// the tile plus a local offset, so it forms no large coordinate in f32.
+		b.Expr("foamOriginMeters"+ax, graph.F32, "mul", ref("foamOrigin"+ax), foamCell)
+		for c := 0; c < cascades; c++ {
+			b.Expr(fmt.Sprintf("foamOriginMod%d%s", c, ax), graph.F32, "mod", ref("foamOriginMeters"+ax), oceanCascades[c].size)
+		}
+		if gpu {
+			// The probe's point origin in the water frame, wrapped per cascade.
+			b.Expr("probeLocal"+ax, graph.F32, "sub", ref("probeOrigin"+ax), ref("water"+ax))
+			for c := 0; c < cascades; c++ {
+				b.Expr(fmt.Sprintf("probeOriginMod%d%s", c, ax), graph.F32, "mod", ref("probeLocal"+ax), oceanCascades[c].size)
+			}
+		}
 	}
 
 	size := func(c int) int {
@@ -263,6 +279,11 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		"dt": ref("dt"), "tau": ref("foamTau"), "threshold": ref("foamThreshold"), "gain": ref("foamGain"),
 		"lambda": ref("lambda"), "cell": foamCell,
 	}
+	for i := 0; i < 4; i++ {
+		c := min(i, cascades-1)
+		fu[fmt.Sprintf("omX%d", i)] = ref(fmt.Sprintf("foamOriginMod%dX", c))
+		fu[fmt.Sprintf("omZ%d", i)] = ref(fmt.Sprintf("foamOriginMod%dZ", c))
+	}
 	foamBind := []graph.Binding{{Name: "foamIn", Resource: "foamA"}}
 	probeBind := []graph.Binding{}
 	for i := 0; i < 4; i++ {
@@ -286,6 +307,8 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		for i := 0; i < 4; i++ {
 			c := min(i, cascades-1)
 			pu[fmt.Sprintf("n%d", i)], pu[fmt.Sprintf("size%d", i)] = size(c), oceanCascades[c].size
+			pu[fmt.Sprintf("omX%d", i)] = ref(fmt.Sprintf("probeOriginMod%dX", c))
+			pu[fmt.Sprintf("omZ%d", i)] = ref(fmt.Sprintf("probeOriginMod%dZ", c))
 		}
 		bind := append([]graph.Binding{{Name: "points", Resource: "probePoints"}}, probeBind...)
 		bind = append(bind, graph.Binding{Name: "out", Resource: "probeOut"})
