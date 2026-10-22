@@ -226,3 +226,22 @@ func TestEmitTSOceanGlobal(t *testing.T) {
 		t.Errorf("bad global name: want exit 1, got %d", code)
 	}
 }
+
+func TestEmitTSBackendFlag(t *testing.T) {
+	emit := func(args ...string) (int, string) {
+		var out bytes.Buffer
+		code := run(append([]string{"emit", "ts", "--set", "ocean"}, args...), &out, io.Discard)
+		return code, out.String()
+	}
+	code, gpu := emit("--global", "G", "--backend", "webgpu")
+	if code != 0 || !strings.Contains(gpu, "oceanEvolve") || strings.Contains(gpu, "gatherLayout") || strings.Contains(gpu, `"webgl2/`) || !strings.Contains(gpu, `"webgpu/high"`) {
+		t.Errorf("webgpu: code %d, wrong content", code)
+	}
+	code, gl := emit("--backend", "webgl2", "--global", "G")
+	if code != 0 || strings.Contains(gl, "WGSL") || strings.Contains(gl, "fftCompute") || !strings.Contains(gl, "gatherLayout") || !strings.Contains(gl, `"webgl2/low"`) {
+		t.Errorf("webgl2: code %d, wrong content", code)
+	}
+	if code, _ := emit("--backend", "vulkan"); code != 1 {
+		t.Errorf("unknown backend: want exit 1, got %d", code)
+	}
+}

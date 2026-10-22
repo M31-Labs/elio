@@ -54,7 +54,7 @@ func TestEmitGraphs(t *testing.T) {
 		t.Error("graph output is not deterministic")
 	}
 	plain, _ := Emit(miniSet(t, true), Meta{Version: "v", Global: "G"})
-	if strings.Contains(plain, "graphs") {
+	if strings.Contains(plain, "graphs:") {
 		t.Error("a set without graphs emitted graphs")
 	}
 }

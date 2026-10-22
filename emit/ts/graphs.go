@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"m31labs.dev/elio/graph"
@@ -27,10 +28,16 @@ export interface ElioGraph {
 }
 `
 
-// graphsLiteral validates the set's graphs and renders them as one JSON
+// graphsLiteral validates the set's graphs (for backend, or all when empty), adds them to the hash h and renders them as one JSON
 // object keyed by NamedGraph.Key, or "" when the set has none.
-func graphsLiteral(set KernelSet) (string, error) {
-	if len(set.Graphs) == 0 {
+func graphsLiteral(set KernelSet, backend string, h io.Writer) (string, error) {
+	var graphs []NamedGraph
+	for _, ng := range set.Graphs {
+		if backend == "" || ng.Graph.Backend == backend {
+			graphs = append(graphs, ng)
+		}
+	}
+	if len(graphs) == 0 {
 		return "", nil
 	}
 	ks := set.GraphKernels()
@@ -38,7 +45,7 @@ func graphsLiteral(set KernelSet) (string, error) {
 	seen := map[string]bool{}
 	var b strings.Builder
 	b.WriteString("{\n")
-	for i, ng := range set.Graphs {
+	for i, ng := range graphs {
 		g := ng.Graph
 		if want := g.Backend + "/" + g.Tier; ng.Key != want || seen[ng.Key] {
 			errs = append(errs, fmt.Errorf("ts: graph key %q must be unique and equal %q", ng.Key, want))
@@ -48,10 +55,12 @@ func graphsLiteral(set KernelSet) (string, error) {
 			errs = append(errs, fmt.Errorf("ts: graph %q: %w", ng.Key, err))
 		}
 		sep := ","
-		if i == len(set.Graphs)-1 {
+		if i == len(graphs)-1 {
 			sep = ""
 		}
-		fmt.Fprintf(&b, "  %s: %s%s\n", quote(ng.Key), compactLit(g), sep)
+		lit := compactLit(g)
+		io.WriteString(h, ng.Key+"\n"+lit+"\n")
+		fmt.Fprintf(&b, "  %s: %s%s\n", quote(ng.Key), lit, sep)
 	}
 	b.WriteString("}")
 	return b.String(), errors.Join(errs...)
