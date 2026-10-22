@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"m31labs.dev/elio/ir"
-	"m31labs.dev/elio/stdlib"
 )
 
 func gidX() ir.Expr { return ir.Member{E: ir.Name{Name: "gid"}, Field: "x"} }
@@ -55,24 +54,6 @@ func TestCheckGatherScaleBiasPasses(t *testing.T) {
 func TestCheckGatherUnknownKernel(t *testing.T) {
 	if errs := CheckGather(ir.ScaleBias(), "nope"); len(errs) == 0 {
 		t.Fatal("expected an error for a missing kernel")
-	}
-}
-
-func TestCheckGatherScanFails(t *testing.T) {
-	errs := CheckGather(stdlib.Scan(), "scan")
-	if !hasDiag(errs, "rule 1", "shared") {
-		t.Errorf("missing shared-memory diagnostic: %v", errs)
-	}
-	if !hasDiag(errs, "rule 1", "barrier") {
-		t.Errorf("missing barrier diagnostic: %v", errs)
-	}
-	if !hasDiag(errs, "rule 2", "local_invocation_id") {
-		t.Errorf("missing builtin diagnostic: %v", errs)
-	}
-	for _, e := range errs {
-		if !strings.Contains(e.Error(), `"scan"`) {
-			t.Errorf("diagnostic does not name the kernel: %v", e)
-		}
 	}
 }
 

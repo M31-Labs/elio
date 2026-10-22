@@ -189,3 +189,21 @@ func TestDoctorReportsTools(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitTSOceanSet(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"emit", "ts", "--set", "ocean"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	for _, want := range []string{"export const oceanMipWGSL", "export const oceanMipGLSL", "export const fftGather256GLSL", "// sha256: "} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	if code := run([]string{"emit", "ts", "--set", "nope"}, io.Discard, io.Discard); code != 2 {
+		t.Errorf("unknown set: want exit 2, got %d", code)
+	}
+	if code := run([]string{"emit", "ts"}, io.Discard, io.Discard); code != 2 {
+		t.Errorf("missing --set: want exit 2, got %d", code)
+	}
+}
