@@ -110,6 +110,14 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		old := sr.arr[sr.idx]
 		sr.arr[sr.idx] = old + toFloat(add)
 		return old, nil
+	case "textureStore":
+		return ev.textureStore(c)
+	case "textureDimensions":
+		tex, err := ev.texture(c.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return []float64{float64(tex.Width), float64(tex.Height)}, nil
 	case "min", "max":
 		a, err := ev.eval(c.Args[0])
 		if err != nil {
@@ -215,4 +223,50 @@ func (ev *evaluator) addrOf(e ir.Expr) (any, error) {
 		return nil, fmt.Errorf("run: &index on non-atomic array %T", base)
 	}
 	return nil, fmt.Errorf("run: unsupported address-of %T", e)
+}
+
+func (ev *evaluator) texture(e ir.Expr) (*Texture, error) {
+	v, err := ev.eval(e)
+	if err != nil {
+		return nil, err
+	}
+	tex, ok := v.(*Texture)
+	if !ok {
+		return nil, fmt.Errorf("run: expected a *run.Texture, got %T", v)
+	}
+	return tex, nil
+}
+
+func (ev *evaluator) textureStore(c ir.Call) (any, error) {
+	if len(c.Args) != 3 {
+		return nil, fmt.Errorf("run: textureStore expects 3 arguments, got %d", len(c.Args))
+	}
+	tex, err := ev.texture(c.Args[0])
+	if err != nil {
+		return nil, err
+	}
+	coord, err := ev.eval(c.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	val, err := ev.eval(c.Args[2])
+	if err != nil {
+		return nil, err
+	}
+	var x, y int
+	switch cv := coord.(type) {
+	case []float64:
+		if len(cv) != 2 {
+			return nil, fmt.Errorf("run: textureStore coordinate needs 2 components, got %d", len(cv))
+		}
+		x, y = int(cv[0]), int(cv[1])
+	case []int64:
+		if len(cv) < 2 {
+			return nil, fmt.Errorf("run: textureStore coordinate needs 2 components, got %d", len(cv))
+		}
+		x, y = int(cv[0]), int(cv[1])
+	default:
+		return nil, fmt.Errorf("run: textureStore coordinate must be a vec2, got %T", coord)
+	}
+	return nil, tex.store(x, y, toVec(val))
 }
