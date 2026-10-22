@@ -1,4 +1,4 @@
-package stdlib
+package kernelsets
 
 import (
 	"regexp"
@@ -10,7 +10,7 @@ import (
 )
 
 func TestOceanKernelSetNames(t *testing.T) {
-	set, err := OceanKernelSet()
+	set, err := Ocean()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ var tsString = regexp.MustCompile("(?s)export const (\\w+(?:WGSL|GLSL)) = `(.*?[
 // TestOceanModuleShadersValidate extracts every shader from the generated
 // module and runs naga on WGSL and glslangValidator on GLSL.
 func TestOceanModuleShadersValidate(t *testing.T) {
-	set, err := OceanKernelSet()
+	set, err := Ocean()
 	if err != nil {
 		t.Fatal(err)
 	}

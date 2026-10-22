@@ -16,9 +16,9 @@ import (
 	"m31labs.dev/elio/emit/ts"
 	"m31labs.dev/elio/emit/wgsl"
 	"m31labs.dev/elio/ir"
+	"m31labs.dev/elio/kernelsets"
 	"m31labs.dev/elio/parse"
 	"m31labs.dev/elio/sema"
-	"m31labs.dev/elio/stdlib"
 )
 
 // version names this Elio build in generated headers.
@@ -33,7 +33,7 @@ func runEmitTS(args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch args[1] {
 	case "ocean":
-		set, err = stdlib.OceanKernelSet()
+		set, err = kernelsets.Ocean()
 	default:
 		fmt.Fprintf(stderr, "elio: unknown kernel set %q (want ocean)\n", args[1])
 		return 2

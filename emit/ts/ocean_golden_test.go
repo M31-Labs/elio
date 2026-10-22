@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"m31labs.dev/elio/emit/ts"
-	"m31labs.dev/elio/stdlib"
+	"m31labs.dev/elio/kernelsets"
 )
 
 func TestOceanGolden(t *testing.T) {
-	set, err := stdlib.OceanKernelSet()
+	set, err := kernelsets.Ocean()
 	if err != nil {
 		t.Fatal(err)
 	}
