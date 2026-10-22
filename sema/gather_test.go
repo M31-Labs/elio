@@ -129,8 +129,13 @@ func TestCheckGatherFiveOutputs(t *testing.T) {
 	if errs := CheckGather(gatherKernel(bind, body...), "k"); !hasDiag(errs, "rule 4", "five") && !hasDiag(errs, "rule 4", "5") {
 		t.Errorf("want a rule 4 diagnostic for five outputs: %v", errs)
 	}
-	if errs := CheckGather(gatherKernel(bind[:4], body[:4]...), "k"); len(errs) != 0 {
-		t.Errorf("four outputs should pass: %v", errs)
+	// Four buffers satisfy rule 4 but cost 64 bytes per pixel (rule 8).
+	errs := CheckGather(gatherKernel(bind[:4], body[:4]...), "k")
+	if hasDiag(errs, "rule 4") || !hasDiag(errs, "rule 8", "64 bytes per pixel") {
+		t.Errorf("four buffers should fail only the byte cap: %v", errs)
+	}
+	if errs := CheckGather(gatherKernel(bind[:2], body[:2]...), "k"); len(errs) != 0 {
+		t.Errorf("two outputs should pass: %v", errs)
 	}
 }
 
