@@ -148,10 +148,79 @@ func FFT2DGather(n int) (*ir.Module, error) {
 	}, nil
 }
 
-// FFT2DCompute is implemented with the compute form (task C3).
+// FFT2DCompute returns the workgroup form: two kernels, fft_rows and
+// fft_cols, each dispatched as n workgroups of n/2 lanes. Workgroup wid.x
+// transforms row wid.x (fft_rows) or column wid.x (fft_cols) entirely in
+// shared memory: it loads the line, runs log2(n) Stockham stages (the formula
+// is in the package comment above) with a workgroup barrier between stages,
+// and writes the line back. Shared memory is array<vec4<f32>, 2n>, two halves
+// that ping-pong: stage t reads half t%2 and writes half (t+1)%2. Each lane
+// handles butterfly j = lid.x, so one dispatch covers all n/2 butterflies.
+//
+//	@group(0) @binding(0) storage read_write data: []vec4<f32>;
+//
+// Run fft_rows, then fft_cols, with a storage barrier between the dispatches.
 func FFT2DCompute(n int) (*ir.Module, error) {
-	if _, err := fftSize(n); err != nil {
+	log2n, err := fftSize(n)
+	if err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("stdlib: FFT2DCompute not implemented")
+	lit := func(v int) ir.Expr { return fu(fmt.Sprintf("%du", v)) }
+	half := n / 2
+	j := fnm("j")
+	sh := func(i ir.Expr) ir.Expr { return fidx(fnm("buf"), i) }
+	data := func(i ir.Expr) ir.Expr { return fidx(fnm("data"), i) }
+
+	kernel := func(name string, addr func(pos ir.Expr) ir.Expr) ir.Kernel {
+		angle := fbin("/", fbin("*", fu(fftTwoPi), fcall("f32", fbin("*", fnm("p"), fnm("s")))), fcall("f32", lit(n)))
+		stage := append([]ir.Stmt{
+			ir.Let{Name: "s", Value: fbin("<<", fu("1u"), fnm("t"))},
+			ir.Let{Name: "p", Value: fbin("/", j, fnm("s"))},
+			ir.Let{Name: "rd", Value: fbin("*", fbin("%", fnm("t"), fu("2u")), lit(n))},
+			ir.Let{Name: "wr", Value: fbin("*", fbin("%", fbin("+", fnm("t"), fu("1u")), fu("2u")), lit(n))},
+			ir.Let{Name: "a", Value: sh(fbin("+", fnm("rd"), j))},
+			ir.Let{Name: "b", Value: sh(fbin("+", fbin("+", fnm("rd"), j), lit(half)))},
+			// y[j + s*p] = a + b; y[j + s*p + s] = (a - b) * w
+			ir.Let{Name: "o", Value: fbin("+", fnm("wr"), fbin("+", j, fbin("*", fnm("s"), fnm("p"))))},
+			ir.Assign{Target: sh(fnm("o")), Value: fbin("+", fnm("a"), fnm("b"))},
+		}, fftTwiddled(fbin("-", fnm("a"), fnm("b")), angle)...)
+		stage = append(stage,
+			ir.Assign{Target: sh(fbin("+", fnm("o"), fnm("s"))), Value: fnm("tw")},
+			ir.Barrier{})
+		final := fbin("*", fu(fmt.Sprintf("%du", log2n%2)), lit(n))
+		return ir.Kernel{
+			Name:          name,
+			WorkgroupSize: [3]int{half, 1, 1},
+			Builtins: []ir.Builtin{
+				{Name: "lid", Builtin: "local_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}},
+				{Name: "wid", Builtin: "workgroup_id", Type: ir.Vec{N: 3, Elem: ir.U32}},
+			},
+			Shared: []ir.Shared{{Name: "buf", Type: ir.Array{Elem: fvec, Len: 2 * n}}},
+			Body: []ir.Stmt{
+				ir.Let{Name: "j", Value: fmem(fnm("lid"), "x")},
+				ir.Let{Name: "line", Value: fmem(fnm("wid"), "x")},
+				ir.Assign{Target: sh(j), Value: data(addr(j))},
+				ir.Assign{Target: sh(fbin("+", j, lit(half))), Value: data(addr(fbin("+", j, lit(half))))},
+				ir.Barrier{},
+				ir.For{
+					Init: ir.Var{Name: "t", Type: ir.U32, Init: fu("0u")},
+					Cond: fbin("<", fnm("t"), lit(log2n)),
+					Post: ir.Assign{Target: fnm("t"), Value: fbin("+", fnm("t"), fu("1u"))},
+					Body: stage,
+				},
+				ir.Assign{Target: data(addr(j)), Value: sh(fbin("+", final, j))},
+				ir.Assign{Target: data(addr(fbin("+", j, lit(half)))), Value: sh(fbin("+", fbin("+", final, j), lit(half)))},
+			},
+		}
+	}
+	line := fnm("line")
+	return &ir.Module{
+		Bindings: []ir.Binding{
+			{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.ReadWrite, Name: "data", Type: ir.Array{Elem: fvec}},
+		},
+		Kernels: []ir.Kernel{
+			kernel("fft_rows", func(pos ir.Expr) ir.Expr { return fbin("+", fbin("*", line, lit(n)), pos) }),
+			kernel("fft_cols", func(pos ir.Expr) ir.Expr { return fbin("+", fbin("*", pos, lit(n)), line) }),
+		},
+	}, nil
 }
