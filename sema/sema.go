@@ -73,6 +73,7 @@ func Check(m *ir.Module) []error {
 		}
 		global.define(b.Name, bindingKind(b), b.Type)
 		c.checkType("binding "+b.Name, b.Type)
+		c.checkBindingAccess(b)
 	}
 
 	for i := range m.Kernels {
@@ -108,13 +109,17 @@ const (
 	kUniform
 	kStorageRead
 	kStorageRW
-	kShared // workgroup-shared variable: mutable, but not a storage buffer (no &)
-	kConst  // module-level compile-time constant: immutable
+	kShared         // workgroup-shared variable: mutable, but not a storage buffer (no &)
+	kConst          // module-level compile-time constant: immutable
+	kStorageTexture // write-only storage texture: only textureStore may write it
 )
 
 func bindingKind(b ir.Binding) symKind {
 	if b.Space == ir.Uniform {
 		return kUniform
+	}
+	if _, ok := b.Type.(ir.StorageTexture); ok {
+		return kStorageTexture
 	}
 	if b.Access == ir.ReadWrite {
 		return kStorageRW
@@ -134,6 +139,8 @@ func (k symKind) immutableHint() string {
 		return "a read-only storage buffer; bind it storage read_write to write"
 	case kConst:
 		return "a const is immutable"
+	case kStorageTexture:
+		return "a storage texture is write-only; use textureStore"
 	}
 	return "read-only"
 }
@@ -189,6 +196,23 @@ func (c *checker) checkType(where string, t ir.Type) {
 		}
 	case ir.Array:
 		c.checkType(where, t.Elem)
+	}
+}
+
+var storageTextureFormats = map[string]bool{"rgba16float": true, "rgba32float": true, "r32float": true}
+
+func (c *checker) checkBindingAccess(b ir.Binding) {
+	tex, isTex := b.Type.(ir.StorageTexture)
+	switch {
+	case isTex:
+		if b.Space != ir.Storage || b.Access != ir.Write {
+			c.errf("binding %q: storage texture needs write access (storage write)", b.Name)
+		}
+		if !storageTextureFormats[tex.Format] {
+			c.errf("binding %q: unknown storage texture format %q", b.Name, tex.Format)
+		}
+	case b.Access == ir.Write:
+		c.errf("binding %q: write access needs a storage texture", b.Name)
 	}
 }
 
@@ -338,6 +362,7 @@ var builtinArity = map[string]int{
 	"clamp": 3, "mix": 3, "smoothstep": 3, "select": 3,
 	"asin": 1, "acos": 1, "atan": 1, "atan2": 2,
 	"atomicAdd": 2, "atomicSub": 2, "atomicMax": 2, "atomicMin": 2,
+	"textureStore": 3, "textureDimensions": 1,
 	"atomicExchange": 2, "atomicStore": 2, "atomicLoad": 1,
 }
 
