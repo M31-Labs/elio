@@ -30,6 +30,19 @@ func OceanSpectrum() (*ir.Module, error) {
 	return parseOcean("ocean/spectrum.elio", OceanSpectrumSource, true)
 }
 
+// OceanEvolveSource is the .elio source of ocean_evolve: it evolves h0 to time
+// t and writes the eight displacement and slope spectra packed as four complex
+// numbers per bin in two buffers, each transformed by one inverse FFT. It is
+// gather-compatible (two RGBA32F outputs).
+//
+//go:embed ocean/evolve.elio
+var OceanEvolveSource string
+
+// OceanEvolve builds the ocean_evolve module from OceanEvolveSource.
+func OceanEvolve() (*ir.Module, error) {
+	return parseOcean("ocean/evolve.elio", OceanEvolveSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)
