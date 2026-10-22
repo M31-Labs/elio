@@ -17,6 +17,19 @@ import (
 //go:embed ocean/rng.elio
 var OceanRngSource string
 
+// OceanSpectrumSource is the .elio source of ocean_spectrum: JONSWAP with
+// Hasselmann spreading for one cascade, written as h0 and omega buffers. The
+// source header documents the model, units and conventions. The hash block is
+// spliced in by OceanSpectrum.
+//
+//go:embed ocean/spectrum.elio
+var OceanSpectrumSource string
+
+// OceanSpectrum builds the ocean_spectrum module from OceanSpectrumSource.
+func OceanSpectrum() (*ir.Module, error) {
+	return parseOcean("ocean/spectrum.elio", OceanSpectrumSource, true)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)

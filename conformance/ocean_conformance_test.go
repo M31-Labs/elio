@@ -24,6 +24,7 @@ type oceanKernel struct {
 func oceanKernels() []oceanKernel {
 	return []oceanKernel{
 		{"ocean_rng", stdlib.OceanRng, []string{"kernel void ocean_rng", "constant OceanRngParams&"}},
+		{"ocean_spectrum", stdlib.OceanSpectrum, []string{"kernel void ocean_spectrum", "constant OceanSpectrumParams&"}},
 	}
 }
 
