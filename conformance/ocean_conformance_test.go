@@ -27,6 +27,7 @@ type oceanKernel struct {
 func oceanKernels() []oceanKernel {
 	return []oceanKernel{
 		{"ocean_rng", stdlib.OceanRng, []string{"kernel void ocean_rng", "constant OceanRngParams&"}},
+		{"ocean_assemble", stdlib.OceanAssemble, []string{"kernel void ocean_assemble", "constant OceanAssembleParams&", "access::write"}},
 		{"ocean_evolve", stdlib.OceanEvolve, []string{"kernel void ocean_evolve", "constant OceanEvolveParams&"}},
 		{"ocean_probe", stdlib.OceanProbe, []string{"kernel void ocean_probe", "constant OceanProbeParams&", "const device float4* disp0"}},
 		{"ocean_spectrum", stdlib.OceanSpectrum, []string{"kernel void ocean_spectrum", "constant OceanSpectrumParams&"}},
@@ -86,6 +87,7 @@ func TestOceanGatherKernels(t *testing.T) {
 	}
 	cases := []tc{
 		{"ocean_evolve", stdlib.OceanEvolve, "ocean_evolve", 2, 2},
+		{"ocean_assemble", stdlib.OceanAssemble, "ocean_assemble", 2, 2},
 	}
 	for _, n := range []int{64, 256} {
 		n := n

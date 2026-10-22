@@ -57,6 +57,18 @@ func OceanProbe() (*ir.Module, error) {
 	return parseOcean("ocean/probe.elio", OceanProbeSource, false)
 }
 
+// OceanAssembleSource is the .elio source of ocean_assemble: it applies
+// choppiness to the inverse-FFT output buffers and writes the displacement and
+// slope rgba16float textures. It is gather-compatible (two RGBA16F outputs).
+//
+//go:embed ocean/assemble.elio
+var OceanAssembleSource string
+
+// OceanAssemble builds the ocean_assemble module from OceanAssembleSource.
+func OceanAssemble() (*ir.Module, error) {
+	return parseOcean("ocean/assemble.elio", OceanAssembleSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)
