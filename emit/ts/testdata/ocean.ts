@@ -6,7 +6,7 @@ export interface ElioBinding {
   group: number;
   binding: number;
   name: string;
-  kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture";
+  kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture" | "texture";
   format?: string;
   elementType: string;
 }
@@ -22,7 +22,7 @@ export interface ElioUniform {
 }
 export interface ElioGatherLayout {
   kernel: string;
-  inputs: { name: string; elem: string; sampler: string; length: string; binding: number }[];
+  inputs: { name: string; kind: "buffer" | "texture"; elem: string; sampler: string; length: string; binding: number }[];
   outputs: { name: string; elem: string; format: string; location: number; variable: string }[];
   uniforms: { name: string; block: string; struct: string; binding: number }[];
 }
@@ -627,6 +627,7 @@ export const oceanEvolveGatherLayout: ElioGatherLayout = {
   "inputs": [
     {
       "name": "h0",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "h0_tex",
       "length": "h0_len",
@@ -634,6 +635,7 @@ export const oceanEvolveGatherLayout: ElioGatherLayout = {
     },
     {
       "name": "omega",
+      "kind": "buffer",
       "elem": "f32",
       "sampler": "omega_tex",
       "length": "omega_len",
@@ -849,6 +851,7 @@ export const oceanAssembleGatherLayout: ElioGatherLayout = {
   "inputs": [
     {
       "name": "fieldA",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldA_tex",
       "length": "fieldA_len",
@@ -856,6 +859,7 @@ export const oceanAssembleGatherLayout: ElioGatherLayout = {
     },
     {
       "name": "fieldB",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB_tex",
       "length": "fieldB_len",
@@ -1020,6 +1024,7 @@ export const oceanMipGatherLayout: ElioGatherLayout = {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",
@@ -1587,6 +1592,7 @@ export const oceanFoamGatherLayout: ElioGatherLayout = {
   "inputs": [
     {
       "name": "foamIn",
+      "kind": "buffer",
       "elem": "f32",
       "sampler": "foamIn_tex",
       "length": "foamIn_len",
@@ -1594,6 +1600,7 @@ export const oceanFoamGatherLayout: ElioGatherLayout = {
     },
     {
       "name": "fieldB0",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB0_tex",
       "length": "fieldB0_len",
@@ -1601,6 +1608,7 @@ export const oceanFoamGatherLayout: ElioGatherLayout = {
     },
     {
       "name": "fieldB1",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB1_tex",
       "length": "fieldB1_len",
@@ -1608,6 +1616,7 @@ export const oceanFoamGatherLayout: ElioGatherLayout = {
     },
     {
       "name": "fieldB2",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB2_tex",
       "length": "fieldB2_len",
@@ -1615,6 +1624,7 @@ export const oceanFoamGatherLayout: ElioGatherLayout = {
     },
     {
       "name": "fieldB3",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB3_tex",
       "length": "fieldB3_len",
@@ -2249,6 +2259,7 @@ export const fftGather64GatherLayout: ElioGatherLayout = {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",
@@ -2537,6 +2548,7 @@ export const fftGather128GatherLayout: ElioGatherLayout = {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",
@@ -2825,6 +2837,7 @@ export const fftGather256GatherLayout: ElioGatherLayout = {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",

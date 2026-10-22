@@ -3,11 +3,11 @@
 // sha256: 617c3759f668baef85f710baa701dc423944edd4638f33a338c277cba8bd1066 (of the WGSL and GLSL sources below, in order)
 
 /**
- * @typedef {{group: number, binding: number, name: string, kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture", format?: string, elementType: string}} ElioBinding
+ * @typedef {{group: number, binding: number, name: string, kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture" | "texture", format?: string, elementType: string}} ElioBinding
  * @typedef {{entry: string, workgroup: [number, number, number]}} ElioEntry
  * @typedef {{name: string, type: string, offset: number, size: number}} ElioField
  * @typedef {{group: number, binding: number, name: string, struct: string, size: number, fields: ElioField[]}} ElioUniform
- * @typedef {{kernel: string, inputs: {name: string, elem: string, sampler: string, length: string, binding: number}[], outputs: {name: string, elem: string, format: string, location: number, variable: string}[], uniforms: {name: string, block: string, struct: string, binding: number}[]}} ElioGatherLayout
+ * @typedef {{kernel: string, inputs: {name: string, kind: "buffer" | "texture", elem: string, sampler: string, length: string, binding: number}[], outputs: {name: string, elem: string, format: string, location: number, variable: string}[], uniforms: {name: string, block: string, struct: string, binding: number}[]}} ElioGatherLayout
  */
 (function () {
   "use strict";
@@ -149,6 +149,7 @@ void main() {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",

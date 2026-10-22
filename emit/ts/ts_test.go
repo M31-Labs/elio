@@ -144,3 +144,24 @@ func hashLine(s string) string {
 	}
 	return ""
 }
+
+func TestEmitSampledTextureBinding(t *testing.T) {
+	src := strings.Replace(miniSrc, "storage read src: []vec4;", "texture src: tex2d;", 1)
+	src = strings.Replace(src, "src[i] * p.k", "textureLoad(src, vec2u(i, 0u), 0u) * p.k", 1)
+	m, err := parse.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Emit(KernelSet{Name: "t", Kernels: []Kernel{{Name: "tex_kernel", Entry: "mini", Module: m, Gather: true}}}, Meta{Version: "v-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"kind": "texture"`, "texture_2d<f32>", "uniform highp sampler2D src;",
+		`"sampler": "src"`, `"length": ""`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}

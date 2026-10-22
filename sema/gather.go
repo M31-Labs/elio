@@ -27,6 +27,9 @@ const MaxGatherOutputs = 4
 //     the coordinate vec2u(i % W, i / W), with i = gid.x (or a let bound to it)
 //     and W a uniform field or textureDimensions(t).x; W must equal the pass
 //     width (elio_width), so each invocation writes its own pixel;
+//     A read texture (ir.Texture2D) is an input: it is read with
+//     textureLoad(t, coord, level) and sized with textureDimensions(t[, level]);
+//     both are free of the pass-width rule below, which concerns outputs;
 //  8. all outputs (buffers and textures) together cost at most 32 bytes per
 //     pixel: a buffer or RGBA32F texture 16, RGBA16F 8, R32F 4.
 //
@@ -169,6 +172,9 @@ func (g *gatherCheck) run() {
 		}
 		switch b.Space {
 		case ir.Storage:
+			if isSampled(b.Type) {
+				continue // an input texture; nothing more to check
+			}
 			if _, ok := b.Type.(ir.StorageTexture); ok {
 				if !g.texOut[b.Name] {
 					g.errf(3, "texture %q is used but never written with textureStore; a gather texture is an output only", b.Name)
@@ -235,6 +241,9 @@ func (g *gatherCheck) isStorage(name string) bool {
 	if ok {
 		if _, tex := b.Type.(ir.StorageTexture); tex {
 			return false // textures are outputs, tracked apart from buffers
+		}
+		if isSampled(b.Type) {
+			return false // sampled textures are inputs, not buffers
 		}
 	}
 	return ok && b.Space == ir.Storage
@@ -344,7 +353,7 @@ func (g *gatherCheck) visitReads(e ir.Expr) {
 	walkExpr(e, func(x ir.Expr) {
 		switch v := x.(type) {
 		case ir.Member:
-			if c, ok := v.E.(ir.Call); ok && c.Func == "textureDimensions" && v.Field == "x" {
+			if c, ok := v.E.(ir.Call); ok && c.Func == "textureDimensions" && v.Field == "x" && !g.sampledArg(c) {
 				dimsX++
 			}
 		case ir.Name:
@@ -358,7 +367,7 @@ func (g *gatherCheck) visitReads(e ir.Expr) {
 			if strings.HasPrefix(v.Func, "atomic") {
 				g.errf(1, "atomic call %s is not allowed", v.Func)
 			}
-			if v.Func == "textureDimensions" {
+			if v.Func == "textureDimensions" && !g.sampledArg(v) {
 				dims++
 			}
 		}
@@ -366,6 +375,19 @@ func (g *gatherCheck) visitReads(e ir.Expr) {
 	if dims != dimsX {
 		g.errf(3, "textureDimensions is only allowed as textureDimensions(t).x, the pass width; texture %q", firstTexture(g, e))
 	}
+}
+
+// sampledArg reports whether a textureDimensions call sizes a sampled texture.
+func (g *gatherCheck) sampledArg(c ir.Call) bool {
+	if len(c.Args) == 0 {
+		return false
+	}
+	n, ok := c.Args[0].(ir.Name)
+	if !ok {
+		return false
+	}
+	b, ok := g.bindings[n.Name]
+	return ok && isSampled(b.Type)
 }
 
 // firstTexture names a texture referenced by e, for diagnostics.

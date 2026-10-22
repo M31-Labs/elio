@@ -154,15 +154,23 @@ func (e *emitter) emit() (string, Layout, error) {
 			}
 			lay.Outputs = append(lay.Outputs, o)
 			loc++
+		case isSampled(b.Type):
+			fmt.Fprintf(w, "uniform highp sampler2D %s;\n", safe(b.Name))
+			lay.Inputs = append(lay.Inputs, Buffer{
+				Name: b.Name, Kind: "texture", Elem: "vec4", Sampler: safe(b.Name), Binding: b.Binding,
+			})
 		default:
 			fmt.Fprintf(w, "uniform highp sampler2D %s_tex;\nuniform uint %s_len;\n", b.Name, b.Name)
 			lay.Inputs = append(lay.Inputs, Buffer{
-				Name: b.Name, Elem: elemKind(b), Sampler: b.Name + "_tex", Length: b.Name + "_len", Binding: b.Binding,
+				Name: b.Name, Kind: "buffer", Elem: elemKind(b), Sampler: b.Name + "_tex", Length: b.Name + "_len", Binding: b.Binding,
 			})
 		}
 	}
 	w.WriteString("\n")
 	for _, in := range lay.Inputs {
+		if in.Kind == "texture" {
+			continue
+		}
 		ty, sw := "float", ".x"
 		switch in.Elem {
 		case "vec2":
@@ -200,10 +208,15 @@ func elemKind(b ir.Binding) string {
 	return "f32"
 }
 
+func isSampled(t ir.Type) bool { _, ok := t.(ir.Texture2D); return ok }
+
 func (e *emitter) isStorage(name string) bool {
 	b, ok := e.bindings[name]
 	if ok {
 		if _, tex := b.Type.(ir.StorageTexture); tex {
+			return false
+		}
+		if isSampled(b.Type) {
 			return false
 		}
 	}
@@ -380,7 +393,7 @@ func (e *emitter) expr(ex ir.Expr) string {
 		if n, ok := x.E.(ir.Name); ok && n.Name == e.gid && e.gid != "" {
 			return gidSwizzle(x.Field)
 		}
-		if c, ok := x.E.(ir.Call); ok && c.Func == "textureDimensions" && x.Field == "x" {
+		if c, ok := x.E.(ir.Call); ok && c.Func == "textureDimensions" && x.Field == "x" && !e.sampledArg(c) {
 			return "elio_width" // the render target is elio_width texels wide
 		}
 		return fmt.Sprintf("%s.%s", e.expr(x.E), safe(x.Field))
@@ -422,6 +435,19 @@ func (e *emitter) call(c ir.Call) string {
 	case "select":
 		if len(c.Args) == 3 {
 			return fmt.Sprintf("(%s ? %s : %s)", e.expr(c.Args[2]), e.expr(c.Args[1]), e.expr(c.Args[0]))
+		}
+	case "textureLoad":
+		if len(c.Args) == 3 {
+			return fmt.Sprintf("texelFetch(%s, ivec2(%s), int(%s))", e.expr(c.Args[0]), e.expr(c.Args[1]), e.expr(c.Args[2]))
+		}
+	case "textureDimensions":
+		// Only a sampled texture reaches here: sema.CheckGather limits a storage
+		// texture's textureDimensions to the .x pass width, handled in Member.
+		switch len(c.Args) {
+		case 1:
+			return fmt.Sprintf("uvec2(textureSize(%s, 0))", e.expr(c.Args[0]))
+		case 2:
+			return fmt.Sprintf("uvec2(textureSize(%s, int(%s)))", e.expr(c.Args[0]), e.expr(c.Args[1]))
 		}
 	}
 	fn := c.Func
@@ -488,6 +514,10 @@ func (e *emitter) infer(ex ir.Expr) ir.Type {
 		switch x.Func {
 		case "arrayLength":
 			return ir.U32
+		case "textureLoad":
+			return ir.Vec{N: 4, Elem: ir.F32}
+		case "textureDimensions":
+			return ir.Vec{N: 2, Elem: ir.U32}
 		case "dot", "length", "distance":
 			return ir.F32
 		case "select":
@@ -510,9 +540,6 @@ func (e *emitter) infer(ex ir.Expr) ir.Type {
 		}
 		return ir.F32
 	case ir.Member:
-		if c, ok := x.E.(ir.Call); ok && c.Func == "textureDimensions" && x.Field == "x" {
-			return ir.U32
-		}
 		base := e.infer(x.E)
 		if n, ok := base.(ir.Named); ok {
 			for _, f := range e.structs[n.Name].Fields {
@@ -532,6 +559,19 @@ func (e *emitter) infer(ex ir.Expr) ir.Type {
 		return e.infer(x.E)
 	}
 	return ir.F32
+}
+
+// sampledArg reports whether a textureDimensions call sizes a sampled texture.
+func (e *emitter) sampledArg(c ir.Call) bool {
+	if len(c.Args) == 0 {
+		return false
+	}
+	n, ok := c.Args[0].(ir.Name)
+	if !ok {
+		return false
+	}
+	b, ok := e.bindings[n.Name]
+	return ok && isSampled(b.Type)
 }
 
 func isScalar(t ir.Type) bool { _, ok := t.(ir.Scalar); return ok }

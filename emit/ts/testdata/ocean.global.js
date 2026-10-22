@@ -3,11 +3,11 @@
 // sha256: 62e1caa85b44b5d9d12e8ca3a9ee69c9b89cdafa3485d2eea64780997f79a5b2 (of the WGSL and GLSL sources below, in order)
 
 /**
- * @typedef {{group: number, binding: number, name: string, kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture", format?: string, elementType: string}} ElioBinding
+ * @typedef {{group: number, binding: number, name: string, kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture" | "texture", format?: string, elementType: string}} ElioBinding
  * @typedef {{entry: string, workgroup: [number, number, number]}} ElioEntry
  * @typedef {{name: string, type: string, offset: number, size: number}} ElioField
  * @typedef {{group: number, binding: number, name: string, struct: string, size: number, fields: ElioField[]}} ElioUniform
- * @typedef {{kernel: string, inputs: {name: string, elem: string, sampler: string, length: string, binding: number}[], outputs: {name: string, elem: string, format: string, location: number, variable: string}[], uniforms: {name: string, block: string, struct: string, binding: number}[]}} ElioGatherLayout
+ * @typedef {{kernel: string, inputs: {name: string, kind: "buffer" | "texture", elem: string, sampler: string, length: string, binding: number}[], outputs: {name: string, elem: string, format: string, location: number, variable: string}[], uniforms: {name: string, block: string, struct: string, binding: number}[]}} ElioGatherLayout
  */
 (function () {
   "use strict";
@@ -625,6 +625,7 @@ void main() {
   "inputs": [
     {
       "name": "h0",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "h0_tex",
       "length": "h0_len",
@@ -632,6 +633,7 @@ void main() {
     },
     {
       "name": "omega",
+      "kind": "buffer",
       "elem": "f32",
       "sampler": "omega_tex",
       "length": "omega_len",
@@ -848,6 +850,7 @@ void main() {
   "inputs": [
     {
       "name": "fieldA",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldA_tex",
       "length": "fieldA_len",
@@ -855,6 +858,7 @@ void main() {
     },
     {
       "name": "fieldB",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB_tex",
       "length": "fieldB_len",
@@ -1020,6 +1024,7 @@ void main() {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",
@@ -1588,6 +1593,7 @@ void main() {
   "inputs": [
     {
       "name": "foamIn",
+      "kind": "buffer",
       "elem": "f32",
       "sampler": "foamIn_tex",
       "length": "foamIn_len",
@@ -1595,6 +1601,7 @@ void main() {
     },
     {
       "name": "fieldB0",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB0_tex",
       "length": "fieldB0_len",
@@ -1602,6 +1609,7 @@ void main() {
     },
     {
       "name": "fieldB1",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB1_tex",
       "length": "fieldB1_len",
@@ -1609,6 +1617,7 @@ void main() {
     },
     {
       "name": "fieldB2",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB2_tex",
       "length": "fieldB2_len",
@@ -1616,6 +1625,7 @@ void main() {
     },
     {
       "name": "fieldB3",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "fieldB3_tex",
       "length": "fieldB3_len",
@@ -2253,6 +2263,7 @@ void main() {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",
@@ -2543,6 +2554,7 @@ void main() {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",
@@ -2833,6 +2845,7 @@ void main() {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",

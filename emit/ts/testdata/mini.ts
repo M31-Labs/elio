@@ -6,7 +6,7 @@ export interface ElioBinding {
   group: number;
   binding: number;
   name: string;
-  kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture";
+  kind: "uniform" | "storage-read" | "storage-rw" | "storage-texture" | "texture";
   format?: string;
   elementType: string;
 }
@@ -22,7 +22,7 @@ export interface ElioUniform {
 }
 export interface ElioGatherLayout {
   kernel: string;
-  inputs: { name: string; elem: string; sampler: string; length: string; binding: number }[];
+  inputs: { name: string; kind: "buffer" | "texture"; elem: string; sampler: string; length: string; binding: number }[];
   outputs: { name: string; elem: string; format: string; location: number; variable: string }[];
   uniforms: { name: string; block: string; struct: string; binding: number }[];
 }
@@ -152,6 +152,7 @@ export const miniKernelGatherLayout: ElioGatherLayout = {
   "inputs": [
     {
       "name": "src",
+      "kind": "buffer",
       "elem": "vec4",
       "sampler": "src_tex",
       "length": "src_len",
