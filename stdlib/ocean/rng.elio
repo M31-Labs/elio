@@ -1,0 +1,45 @@
+// rng.elio — the ocean hash RNG as a standalone kernel. One invocation per
+// bin of an n x n cascade in natural FFT order; it writes
+// (z0, z1, u1, u2): two standard normals and the two uniforms in (0, 1] they
+// came from.
+//
+// This file is not standalone: the hash block is spliced in by OceanRng, so
+// `elio emit` on the bare file does not give the real kernel. Elio has no user
+// functions yet, so ocean_spectrum repeats the same splice.
+
+struct OceanRngParams {
+  n: u32;
+  cascade: u32;
+  seed: u32;
+  _pad: u32;
+}
+
+@group(0) @binding(0) uniform rng: OceanRngParams;
+@group(0) @binding(1) storage read_write normals: []vec4;
+
+@workgroup(64) kernel ocean_rng(gid: global_invocation_id) {
+  let i = gid.x;
+  if i >= rng.n * rng.n { return; }
+  let x = i % rng.n;
+  let z = i / rng.n;
+  // Signed wavenumber indices of the natural FFT order.
+  var rix: i32 = i32(x);
+  if x >= rng.n / 2u { rix = i32(x) - i32(rng.n); }
+  var riz: i32 = i32(z);
+  if z >= rng.n / 2u { riz = i32(z) - i32(rng.n); }
+  let rseed = rng.seed;
+  let rcascade = rng.cascade;
+  // The two hash words rb1 and rb2 come from the PCG hash block that Go
+  // splices over the marker below (the .elio language has no bit operators).
+  // See oceanRngWords in stdlib/ocean.go.
+  var rb1: u32 = 0u;
+  var rb2: u32 = 0u;
+  let ocean_rng_words = 0u;
+  // Uniforms in (0, 1] from the top 24 bits (exact in f32), then Box-Muller.
+  let ru1 = (f32(rb1 / 256u) + 1.0) / 16777216.0;
+  let ru2 = (f32(rb2 / 256u) + 1.0) / 16777216.0;
+  let rrad = sqrt(-2.0 * log(ru1));
+  let rz0 = rrad * cos(6.283185307179586 * ru2);
+  let rz1 = rrad * sin(6.283185307179586 * ru2);
+  normals[i] = vec4(rz0, rz1, ru1, ru2);
+}

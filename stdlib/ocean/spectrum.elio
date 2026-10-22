@@ -1,0 +1,190 @@
+// spectrum.elio — ocean_spectrum: the initial wave spectrum of one cascade.
+// One invocation per bin of an n x n grid in natural FFT order. It writes
+//
+//   h0[i]    = (Re h0(k), Im h0(k), Re conj h0(-k), Im conj h0(-k))
+//   omega[i] = sqrt(g |k|)                            rad/s, deep water
+//
+// for the bin's wavevector k = (2 pi ix / L, 2 pi iz / L), where ix and iz are
+// the signed indices (ix = x if x < n/2 else x - n; same for iz) and L is the
+// tile size in metres. The mirror bin of (x, z) is ((n-x) mod n, (n-z) mod n);
+// its index is (-ix, -iz), so the mirror bin's (zw) lanes are the conjugate of
+// this bin's (xy) lanes, which is what makes every evolved field Hermitian.
+//
+// Units: k rad/m, omega rad/s, S(omega) m^2 s, S(kx, kz) m^4, h0 metres.
+// A bin is non-zero only if k_min <= |k| < k_max, it is not on the Nyquist row
+// or column (x = n/2 or z = n/2) and k != 0; otherwise h0 is exactly zero.
+//
+// Spectrum model.
+//   JONSWAP (Hasselmann et al. 1973), for wind speed U (m/s at 10 m) and fetch F (m):
+//     S(w)    = alpha g^2 w^-5 exp(-5/4 (wp/w)^4) gamma^r
+//     r       = exp(-(w - wp)^2 / (2 sigma^2 wp^2)),  sigma = 0.07 (w <= wp), 0.09 (w > wp)
+//     wp      = 22 (g^2 / (U F))^(1/3)                rad/s
+//     alpha   = 0.076 (U^2 / (F g))^0.22
+//   Directional spreading (Hasselmann et al. 1980):
+//     D(theta) = N(s) cos^(2s)(theta / 2),  N(s) = Gamma(s + 1) / (2 sqrt(pi) Gamma(s + 1/2))
+//     integrates to 1 over theta in [-pi, pi]. The sharpness depends on frequency:
+//     s = spread (w / wp)^4.06 for w <= wp, spread (w / wp)^-2.33 above (the
+//     exponents of the 1980 fit; the peak value is the authored `spread`).
+//   Swell (optional, share `swell` of the energy): the same JONSWAP form with
+//     peak 0.5 wp, alpha scaled by 0.5^4 so that alpha g^2 / wp^4 (and so the
+//     energy) matches the wind sea, gamma = 7, spread min(4 spread, 64), and
+//     direction `swellDir`. Total S = (1 - swell) S_wind + swell S_swell.
+//   Conversion to the 2D wavenumber spectrum. With w = sqrt(g k), dw/dk = g / (2 w)
+//     and the polar area element k dk dtheta:
+//     S(kx, kz) = S(w) D(theta) (dw / dk) / k = S(w) D(theta) g / (2 w k)    m^4
+//   Amplitude. With dk = 2 pi / L and (z0, z1) independent standard normals,
+//     h0(k) = (z0 + i z1) sqrt(S(k)) dk / 2
+//   so E|h0(k)|^2 = S(k) dk^2 / 2 and the evolved bin h(k, t) =
+//   h0(k) e^{i w t} + conj h0(-k) e^{-i w t} has E|h|^2 = (S(k) + S(-k)) dk^2 / 2.
+//   The sum over all bins of E|h|^2 is the variance m0 = integral of S dk, and
+//   Hs = 4 sqrt(m0).
+//
+// Directions are radians in the x-z plane, measured from +x toward +z; a wave
+// travels along its direction.
+//
+// The hash words rb1, rb2 are spliced over the marker below by OceanSpectrum
+// (the .elio language has no bit operators). Elio has no user functions, so the
+// hash block, Box-Muller and the Gamma-function ratio are written inline.
+
+const G: f32 = 9.81;
+
+struct OceanSpectrumParams {
+  n: u32;
+  cascade: u32;
+  seed: u32;
+  _pad: u32;
+  windSpeed: f32;
+  fetchKm: f32;
+  gamma: f32;
+  spread: f32;
+  swell: f32;
+  windDir: f32;
+  swellDir: f32;
+  tile: f32;
+  kMin: f32;
+  kMax: f32;
+  _pad1: f32;
+  _pad2: f32;
+}
+
+@group(0) @binding(0) uniform spec: OceanSpectrumParams;
+@group(0) @binding(1) storage read_write h0: []vec4;
+@group(0) @binding(2) storage read_write omega: []f32;
+
+@workgroup(64) kernel ocean_spectrum(gid: global_invocation_id) {
+  let i = gid.x;
+  let n = spec.n;
+  if i >= n * n { return; }
+  let x = i % n;
+  let z = i / n;
+  // Signed wavenumber indices of the natural FFT order.
+  var ix0: i32 = i32(x);
+  if x >= n / 2u { ix0 = i32(x) - i32(n); }
+  var iz0: i32 = i32(z);
+  if z >= n / 2u { iz0 = i32(z) - i32(n); }
+  let dk = 6.283185307179586 / spec.tile;
+  let k0 = dk * sqrt(f32(ix0) * f32(ix0) + f32(iz0) * f32(iz0));
+  omega[i] = sqrt(G * k0);
+
+  // Is this bin inside the band and off the Nyquist lines and k = 0?
+  var inband = true;
+  if x == n / 2u { inband = false; }
+  if z == n / 2u { inband = false; }
+  if ix0 == 0 {
+    if iz0 == 0 { inband = false; }
+  }
+  if k0 < spec.kMin { inband = false; }
+  if k0 >= spec.kMax { inband = false; }
+
+  var hr = 0.0;
+  var hi = 0.0;
+  var mr = 0.0;
+  var mi = 0.0;
+  if inband {
+    // JONSWAP peak frequency and alpha for the wind sea.
+    let fetch = spec.fetchKm * 1000.0;
+    let wp = 22.0 * pow(G * G / (spec.windSpeed * fetch), 0.3333333333333333);
+    let alpha = 0.076 * pow(spec.windSpeed * spec.windSpeed / (fetch * G), 0.22);
+    // s = 0 is h0(k), s = 1 is h0(-k).
+    for (var sgn: u32 = 0u; sgn < 2u; sgn = sgn + 1u) {
+      var rix: i32 = ix0;
+      var riz: i32 = iz0;
+      if sgn == 1u {
+        rix = 0 - ix0;
+        riz = 0 - iz0;
+      }
+      let rseed = spec.seed;
+      let rcascade = spec.cascade;
+      var rb1: u32 = 0u;
+      var rb2: u32 = 0u;
+      let ocean_rng_words = 0u;
+      // Uniforms in (0, 1] from the top 24 bits (exact in f32), then Box-Muller.
+      let ru1 = (f32(rb1 / 256u) + 1.0) / 16777216.0;
+      let ru2 = (f32(rb2 / 256u) + 1.0) / 16777216.0;
+      let rrad = sqrt(-2.0 * log(ru1));
+      let z0 = rrad * cos(6.283185307179586 * ru2);
+      let z1 = rrad * sin(6.283185307179586 * ru2);
+
+      let kx = dk * f32(rix);
+      let kz = dk * f32(riz);
+      let kk = sqrt(kx * kx + kz * kz);
+      let w = sqrt(G * kk);
+      var dens = 0.0;
+      // Component 0 is the wind sea, component 1 the swell.
+      for (var c: u32 = 0u; c < 2u; c = c + 1u) {
+        var weight = 1.0 - spec.swell;
+        var wpk = wp;
+        var alph = alpha;
+        var gam = spec.gamma;
+        var sp = spec.spread;
+        var dir = spec.windDir;
+        if c == 1u {
+          weight = spec.swell;
+          wpk = 0.5 * wp;
+          alph = alpha * 0.0625;
+          gam = 7.0;
+          sp = min(4.0 * spec.spread, 64.0);
+          dir = spec.swellDir;
+        }
+        if weight > 0.0 {
+          var sigma = 0.07;
+          if w > wpk { sigma = 0.09; }
+          let rpk = exp(-(w - wpk) * (w - wpk) / (2.0 * sigma * sigma * wpk * wpk));
+          let sw = alph * G * G / pow(w, 5.0) * exp(-1.25 * pow(wpk / w, 4.0)) * pow(gam, rpk);
+          // Frequency-dependent spreading sharpness.
+          var s = sp * pow(w / wpk, 4.06);
+          if w > wpk { s = sp * pow(w / wpk, -2.33); }
+          // ln N(s) = ln Gamma(s + 1) - ln Gamma(s + 1/2) - ln(2 sqrt(pi)).
+          // ln Gamma(x) by Stirling's series at x + 6, minus ln of the six
+          // factors x (x + 1) ... (x + 5) (Gamma(x + 6) = Gamma(x) x ... (x + 5)).
+          var lnn = -1.2655121234846454;
+          for (var q: u32 = 0u; q < 2u; q = q + 1u) {
+            var xq = s + 1.0;
+            var sign = 1.0;
+            if q == 1u {
+              xq = s + 0.5;
+              sign = -1.0;
+            }
+            let xs = xq + 6.0;
+            let stirling = (xs - 0.5) * log(xs) - xs + 0.9189385332046727 + 1.0 / (12.0 * xs) - 1.0 / (360.0 * xs * xs * xs) + 1.0 / (1260.0 * xs * xs * xs * xs * xs);
+            let prod = xq * (xq + 1.0) * (xq + 2.0) * (xq + 3.0) * (xq + 4.0) * (xq + 5.0);
+            lnn = lnn + sign * (stirling - log(prod));
+          }
+          let cosT = (kx * cos(dir) + kz * sin(dir)) / kk;
+          let base = max(0.5 * (1.0 + cosT), 0.00000001);
+          dens = dens + weight * sw * exp(lnn) * pow(base, s) * G / (2.0 * w * kk);
+        }
+      }
+      let amp = 0.5 * sqrt(dens) * dk;
+      if sgn == 0u {
+        hr = z0 * amp;
+        hi = z1 * amp;
+      } else {
+        // Stored as the conjugate: conj h0(-k).
+        mr = z0 * amp;
+        mi = 0.0 - z1 * amp;
+      }
+    }
+  }
+  h0[i] = vec4(hr, hi, mr, mi);
+}
