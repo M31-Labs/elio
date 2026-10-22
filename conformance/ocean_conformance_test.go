@@ -28,7 +28,7 @@ func oceanKernels() []oceanKernel {
 	return []oceanKernel{
 		{"ocean_rng", stdlib.OceanRng, []string{"kernel void ocean_rng", "constant OceanRngParams&"}},
 		{"ocean_foam", stdlib.OceanFoam, []string{"kernel void ocean_foam", "constant OceanFoamParams&", "access::write"}},
-		{"ocean_mip", stdlib.OceanMip, []string{"kernel void ocean_mip", "constant OceanMipParams&", "access::write"}},
+		{"ocean_mip", stdlib.OceanMip, []string{"kernel void ocean_mip", "constant OceanMipParams&", "access::write", "texture2d<float, access::read> src", "src.read("}},
 		{"ocean_assemble", stdlib.OceanAssemble, []string{"kernel void ocean_assemble", "constant OceanAssembleParams&", "access::write"}},
 		{"ocean_evolve", stdlib.OceanEvolve, []string{"kernel void ocean_evolve", "constant OceanEvolveParams&"}},
 		{"ocean_probe", stdlib.OceanProbe, []string{"kernel void ocean_probe", "constant OceanProbeParams&", "const device float4* disp0"}},
@@ -115,5 +115,29 @@ func TestOceanGatherKernels(t *testing.T) {
 			}
 			validateES(t, src)
 		})
+	}
+}
+
+// TestOceanMipGatherInputIsTexture checks that ocean_mip's source is a sampled
+// 2D texture in the gather layout, not a buffer behind elio_width.
+func TestOceanMipGatherInputIsTexture(t *testing.T) {
+	mod, err := stdlib.OceanMip()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, lay, err := gather.Emit(mod, "ocean_mip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lay.Inputs) != 1 || lay.Inputs[0].Kind != "texture" || lay.Inputs[0].Sampler != "src" || lay.Inputs[0].Length != "" {
+		t.Errorf("inputs = %+v", lay.Inputs)
+	}
+	for _, want := range []string{"uniform highp sampler2D src;", "texelFetch(src, ", "textureSize(src, int(mip.srcLevel))"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("GLSL ES lacks %q:\n%s", want, src)
+		}
+	}
+	if strings.Contains(src, "src_at") || strings.Contains(src, "src_len") {
+		t.Errorf("GLSL ES linearizes the texture:\n%s", src)
 	}
 }
