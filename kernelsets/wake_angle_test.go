@@ -13,45 +13,50 @@ import (
 // accumulate and node params read 0) with the given overrides.
 func evalExprs(g graph.Graph, set map[string]float64) map[string]float64 {
 	v := map[string]float64{}
+	var eval func(op string, a []any) float64
 	arg := func(a any) float64 {
-		if s, ok := a.(string); ok {
-			return v[s[len("param:"):]]
-		}
 		switch x := a.(type) {
+		case string:
+			return v[x[len("param:"):]]
+		case graph.Expr:
+			return eval(x.Op, x.Args)
 		case int:
 			return float64(x)
 		}
 		return a.(float64)
+	}
+	eval = func(op string, a []any) float64 {
+		switch op {
+		case "add":
+			return arg(a[0]) + arg(a[1])
+		case "sub":
+			return arg(a[0]) - arg(a[1])
+		case "mul":
+			return arg(a[0]) * arg(a[1])
+		case "div":
+			return arg(a[0]) / arg(a[1])
+		case "mod":
+			x, m := arg(a[0]), arg(a[1])
+			return x - m*math.Floor(x/m)
+		case "min":
+			return math.Min(arg(a[0]), arg(a[1]))
+		case "max":
+			return math.Max(arg(a[0]), arg(a[1]))
+		case "floor":
+			return math.Floor(arg(a[0]))
+		case "sin":
+			return math.Sin(arg(a[0]))
+		case "cos":
+			return math.Cos(arg(a[0]))
+		}
+		panic("unknown op " + op)
 	}
 	for _, p := range g.Params {
 		switch p.Source.Kind {
 		case graph.SourceValue:
 			v[p.Name] = p.Source.Value
 		case graph.SourceExpr:
-			a := p.Source.Args
-			switch p.Source.Op {
-			case "add":
-				v[p.Name] = arg(a[0]) + arg(a[1])
-			case "sub":
-				v[p.Name] = arg(a[0]) - arg(a[1])
-			case "mul":
-				v[p.Name] = arg(a[0]) * arg(a[1])
-			case "div":
-				v[p.Name] = arg(a[0]) / arg(a[1])
-			case "mod":
-				x, m := arg(a[0]), arg(a[1])
-				v[p.Name] = x - m*math.Floor(x/m)
-			case "min":
-				v[p.Name] = math.Min(arg(a[0]), arg(a[1]))
-			case "max":
-				v[p.Name] = math.Max(arg(a[0]), arg(a[1]))
-			case "floor":
-				v[p.Name] = math.Floor(arg(a[0]))
-			case "sin":
-				v[p.Name] = math.Sin(arg(a[0]))
-			case "cos":
-				v[p.Name] = math.Cos(arg(a[0]))
-			}
+			v[p.Name] = eval(p.Source.Op, p.Source.Args)
 		}
 		if x, ok := set[p.Name]; ok {
 			v[p.Name] = x

@@ -195,6 +195,9 @@ func (b *Builder) Workgroups(kernel, entry string, elements int) *[3]int {
 	if !ok {
 		return nil
 	}
+	if entry == "" {
+		entry = primaryEntry(k)
+	}
 	for _, e := range k.Module.Kernels {
 		if e.Name == entry {
 			per := e.WorkgroupSize[0]

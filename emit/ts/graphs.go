@@ -59,7 +59,14 @@ func graphsLiteral(set KernelSet, backend string, h io.Writer) (string, error) {
 		if i == len(graphs)-1 {
 			sep = ""
 		}
-		lit := compactLit(g)
+		out := g
+		for _, base := range graphs[:i] {
+			if base.Graph.Backend == g.Backend && base.Graph.ParamsFrom == "" && graph.SameParams(base.Graph, g) {
+				out = graph.Share(g, base.Key)
+				break
+			}
+		}
+		lit := compactLit(out)
 		io.WriteString(h, ng.Key+"\n"+lit+"\n")
 		fmt.Fprintf(&b, "  %s: %s%s\n", quote(ng.Key), lit, sep)
 	}

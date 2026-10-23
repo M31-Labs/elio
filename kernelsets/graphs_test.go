@@ -2,6 +2,7 @@ package kernelsets
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -171,10 +172,9 @@ func TestOceanGraphWaterWrap(t *testing.T) {
 	sizes := []float64{1600, 250, 37, 5.3}
 	for _, key := range graphKeys {
 		g := gs[key]
+		// Every tier declares all four cascades' params (low simply ignores the
+		// fourth), so the tiers share one param list.
 		cascades := 4
-		if g.Tier == "low" {
-			cascades = 3
-		}
 		params := map[string]graph.Param{}
 		for _, p := range g.Params {
 			params[p.Name] = p
@@ -224,7 +224,7 @@ func TestOceanGraphWrappedOrigins(t *testing.T) {
 				t.Errorf("%s: no param %s", key, name)
 				return
 			}
-			if p.Source.Kind != graph.SourceExpr || p.Source.Op != op || p.Source.Args[0] != a || p.Source.Args[1] != b {
+			if p.Source.Kind != graph.SourceExpr || p.Source.Op != op || !reflect.DeepEqual(p.Source.Args, []any{a, b}) {
 				t.Errorf("%s: %s source %+v, want %s(%v, %v)", key, name, p.Source, op, a, b)
 			}
 		}
@@ -242,9 +242,8 @@ func TestOceanGraphWrappedOrigins(t *testing.T) {
 			return nil
 		}
 		for _, ax := range []string{"X", "Z"} {
-			wantExpr("foamOriginMeters"+ax, "mul", "param:foamOrigin"+ax, 0.5)
 			for c := 0; c < cascades; c++ {
-				wantExpr(fmt.Sprintf("foamOriginMod%d%s", c, ax), "mod", "param:foamOriginMeters"+ax, sizes[c])
+				wantExpr(fmt.Sprintf("foamOriginMod%d%s", c, ax), "mod", graph.E("mul", "param:foamOrigin"+ax, 0.5), sizes[c])
 				if got := uniform("foam", fmt.Sprintf("om%s%d", ax, c)); got != fmt.Sprintf("param:foamOriginMod%d%s", c, ax) {
 					t.Errorf("%s: foam om%s%d = %v", key, ax, c, got)
 				}
@@ -262,9 +261,8 @@ func TestOceanGraphWrappedOrigins(t *testing.T) {
 			if p := params["probeOrigin"+ax]; p.Source.Kind != graph.SourceValue || p.Type != graph.F32 {
 				t.Errorf("%s: probeOrigin%s = %+v", key, ax, p)
 			}
-			wantExpr("probeLocal"+ax, "sub", "param:probeOrigin"+ax, "param:water"+ax)
 			for c := 0; c < cascades; c++ {
-				wantExpr(fmt.Sprintf("probeOriginMod%d%s", c, ax), "mod", "param:probeLocal"+ax, sizes[c])
+				wantExpr(fmt.Sprintf("probeOriginMod%d%s", c, ax), "mod", graph.E("sub", "param:probeOrigin"+ax, "param:water"+ax), sizes[c])
 				if got := uniform("probe", fmt.Sprintf("om%s%d", ax, c)); got != fmt.Sprintf("param:probeOriginMod%d%s", c, ax) {
 					t.Errorf("%s: probe om%s%d = %v", key, ax, c, got)
 				}

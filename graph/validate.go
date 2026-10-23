@@ -76,6 +76,9 @@ func (v *validator) run() {
 	if g.Version != Version {
 		v.errf("version %d, want %d", g.Version, Version)
 	}
+	if g.ParamsFrom != "" {
+		v.errf("paramsFrom %q: resolve the reference (Unshare) before validating", g.ParamsFrom)
+	}
 	v.checkParams()
 	v.checkResources()
 	flat, err := Expand(g)
@@ -319,6 +322,9 @@ func (v *validator) checkCopy(p Pass) {
 
 func (v *validator) checkPass(p Pass) {
 	v.checkWhen(p.Name, p.When)
+	if p.Type == "" {
+		p.Type = "kernel"
+	}
 	switch p.Type {
 	case "mipmap":
 		r, ok := v.res[p.Resource]
@@ -342,6 +348,9 @@ func (v *validator) checkPass(p Pass) {
 		v.errf("pass %q: unknown kernel %q", p.Name, p.Kernel)
 		return
 	}
+	if p.Entry == "" {
+		p.Entry = primaryEntry(k)
+	}
 	var entry *ir.Kernel
 	for i := range k.Module.Kernels {
 		if k.Module.Kernels[i].Name == p.Entry {
@@ -354,7 +363,7 @@ func (v *validator) checkPass(p Pass) {
 	}
 	web2 := v.g.Backend == WebGL2
 	if web2 {
-		if !k.Gather || p.Entry != k.Entry {
+		if !k.Gather || p.Entry != primaryEntry(k) {
 			v.errf("pass %q: webgl2 runs gather kernels only; %q entry %q is not one", p.Name, p.Kernel, p.Entry)
 		}
 		if p.Dispatch != nil || p.Target == nil {
@@ -654,4 +663,13 @@ func MemoryBytes(g Graph) int64 {
 		}
 	}
 	return total
+}
+
+// primaryEntry is the kernel's primary entry: the named Entry, or the only
+// entry of a one-kernel module.
+func primaryEntry(k Kernel) string {
+	if k.Entry == "" && k.Module != nil && len(k.Module.Kernels) == 1 {
+		return k.Module.Kernels[0].Name
+	}
+	return k.Entry
 }

@@ -11,6 +11,7 @@ package graph
 
 import (
 	"encoding/json"
+	"reflect"
 
 	"m31labs.dev/elio/ir"
 )
@@ -49,11 +50,15 @@ type Graph struct {
 	Backend    string            `json:"backend"`
 	Tier       string            `json:"tier"`
 	Version    int               `json:"version"`
-	Params     []Param           `json:"params"`
+	Params     []Param           `json:"params,omitempty"`
 	Resources  []Resource        `json:"resources"`
 	Passes     []Pass            `json:"passes"`
 	FrameSwaps [][2]string       `json:"frameSwaps"`
 	Exports    map[string]string `json:"exports"`
+	// ParamsFrom, set only on emitted graphs, names the key of another graph
+	// of the same backend from which this one takes Params and ExportParams
+	// (which it then leaves empty). The named graph never has ParamsFrom.
+	ParamsFrom string `json:"paramsFrom,omitempty"`
 	// ExportParams lists numeric params the surface binds as uniforms (for
 	// example a water offset wrapped per cascade).
 	ExportParams []string `json:"exportParams,omitempty"`
@@ -157,9 +162,11 @@ type Resource struct {
 // with every resource where it began (FrameSwaps aside).
 type Pass struct {
 	Name   string `json:"name"`
-	Type   string `json:"type"` // "kernel", "mipmap", "copy" or "repeat"
+	Type   string `json:"type,omitempty"` // "kernel" (the default when empty), "mipmap", "copy" or "repeat"
 	Kernel string `json:"kernel,omitempty"`
-	Entry  string `json:"entry,omitempty"`
+	// Entry is the kernel's entry point; empty means the kernel's primary entry
+	// (the Entry of its Kernel in the kernel set).
+	Entry string `json:"entry,omitempty"`
 	// When is "always" (or empty, which is omitted from JSON), "param:<boolParam>" or "changed:<p1>,<p2>,...": the
 	// pass runs on the first frame and on any frame when one of those params
 	// changed (a tween counts).
@@ -228,4 +235,24 @@ type Kernel struct {
 	Entry  string // primary entry; for a gather kernel, the gather entry
 	Module *ir.Module
 	Gather bool
+}
+
+// SameParams reports whether a and b declare the same params and exported
+// params.
+func SameParams(a, b Graph) bool {
+	return reflect.DeepEqual(a.Params, b.Params) && reflect.DeepEqual(a.ExportParams, b.ExportParams)
+}
+
+// Share returns g with its params and exported params replaced by a reference
+// to the graph under key, for emission. g is not modified.
+func Share(g Graph, key string) Graph {
+	g.Params, g.ExportParams, g.ParamsFrom = nil, nil, key
+	return g
+}
+
+// Unshare returns g with the params and exported params of base, the graph its
+// ParamsFrom names, and no reference.
+func Unshare(g, base Graph) Graph {
+	g.Params, g.ExportParams, g.ParamsFrom = base.Params, base.ExportParams, ""
+	return g
 }

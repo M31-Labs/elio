@@ -72,3 +72,22 @@ func TestEmitRejectsInvalidGraph(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestEmitSharesIdenticalParams(t *testing.T) {
+	set := miniSet(t, true)
+	a, b, c := miniGraph(), miniGraph(), miniGraph()
+	b.Tier, c.Tier = "medium", "low"
+	c.Params = append([]graph.Param(nil), c.Params...)
+	c.Params[0].Source.Value = 9
+	set.Graphs = []NamedGraph{{Key: "webgl2/high", Graph: a}, {Key: "webgl2/medium", Graph: b}, {Key: "webgl2/low", Graph: c}}
+	out, err := Emit(set, Meta{Version: "v", Global: "G", Backend: "webgl2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out, `"paramsFrom":"webgl2/high"`); n != 1 {
+		t.Errorf("%d graphs share the first graph's params, want 1 (medium)", n)
+	}
+	if n := strings.Count(out, `"params":`); n != 2 {
+		t.Errorf("%d graphs carry their own params, want 2 (high and low)", n)
+	}
+}
