@@ -35,6 +35,7 @@ func numericType(t string) bool { return t == F32 || t == U32 || t == I32 }
 //     only on WebGPU.
 //  3. WebGL2 passes use only gather kernels, and every written resource is a
 //     render target, at most 32 bytes per pixel in total.
+//     A WebGL2 pass reads a buffer only at its own width (copy passes widen).
 //  4. Dispatch or target sizes cover every element of the written resources.
 //  5. Every uniform field the kernel declares gets a value; every "param:"
 //     reference (uniform, when, resource feed, expression) names a declared
@@ -279,6 +280,25 @@ func (v *validator) checkWhen(pass, when string) {
 	}
 }
 
+// checkCopy checks a copy pass: WebGL2 only, two buffers of the same element
+// type and count, the destination declared Width texels wide.
+func (v *validator) checkCopy(p Pass) {
+	from, fok := v.res[p.From]
+	to, tok := v.res[p.To]
+	switch {
+	case v.g.Backend != WebGL2:
+		v.errf("pass %q: a copy pass is webgl2 only", p.Name)
+	case !fok || !tok || from.Kind != "buffer" || to.Kind != "buffer":
+		v.errf("pass %q: copy needs two buffer resources, got %q and %q", p.Name, p.From, p.To)
+	case from.ElementType != to.ElementType || from.Count != to.Count:
+		v.errf("pass %q: copy: %q and %q differ in element type or count", p.Name, p.From, p.To)
+	case p.Width <= 0 || to.Width != p.Width:
+		v.errf("pass %q: copy width %d, but %q is %d wide", p.Name, p.Width, p.To, to.Width)
+	case p.From == p.To:
+		v.errf("pass %q: copy from a buffer to itself", p.Name)
+	}
+}
+
 func (v *validator) checkPass(p Pass) {
 	v.checkWhen(p.Name, p.When)
 	switch p.Type {
@@ -291,9 +311,12 @@ func (v *validator) checkPass(p Pass) {
 			v.errf("pass %q: mipmap needs a texture resource, got %q", p.Name, p.Resource)
 		}
 		return
+	case "copy":
+		v.checkCopy(p)
+		return
 	case "kernel":
 	default:
-		v.errf("pass %q: type %q is not kernel or mipmap", p.Name, p.Type)
+		v.errf("pass %q: type %q is not kernel, mipmap, copy or repeat", p.Name, p.Type)
 		return
 	}
 	k, ok := v.kernels[p.Kernel]
@@ -393,6 +416,9 @@ func (v *validator) checkPass(p Pass) {
 		if r.Kind == "texture" && (b.Level < 0 || b.Level >= r.MipLevels) {
 			v.errf("pass %q: binding %q: level %d, resource %q has %d", p.Name, mb.Name, b.Level, r.Name, r.MipLevels)
 			continue
+		}
+		if _, isArr := mb.Type.(ir.Array); isArr && web2 && p.Target != nil && mb.Access == ir.Read && r.Width != p.Target.ElioWidth {
+			v.errf("pass %q: reads buffer %q at width %d, but the pass is %d wide; make a copy of it at that width with a copy pass", p.Name, r.Name, r.Width, p.Target.ElioWidth)
 		}
 		if r.Kind == "buffer" && b.Level != 0 {
 			v.errf("pass %q: binding %q: a buffer has no levels", p.Name, mb.Name)

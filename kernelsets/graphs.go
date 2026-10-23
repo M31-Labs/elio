@@ -453,16 +453,34 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 	fu["wakeWidth"], fu["wakeGain"], fu["wakeCell"] = wakeN, ref("wakeFoamGainEff"), ref("wakeCell")
 	fu["wakeRelX"], fu["wakeRelZ"] = ref("wakeRelX"), ref("wakeRelZ")
 	fu["wakeOriginX"], fu["wakeOriginZ"] = ref("wakeOriginModX"), ref("wakeOriginModZ")
+	// WebGL2: the foam pass is foamWidth wide and reads each buffer at that
+	// width, so it reads copies made by copy passes (the same elements laid out
+	// foamWidth texels wide). WebGPU reads the buffers directly.
+	foamRead := func(src string, count int) string {
+		if gpu {
+			return src
+		}
+		view := src + "_w"
+		buf(view, "vec4<f32>", count, foamWidth)
+		b.Pass(graph.Pass{Name: "foam.copy." + src, Type: "copy", From: src, To: view, Width: foamWidth})
+		return view
+	}
 	foamBind := []graph.Binding{{Name: "foamIn", Resource: "foamA"}}
 	probeBind := []graph.Binding{}
+	var views [4]string
 	for i := 0; i < 4; i++ {
 		c := min(i, cascades-1) // an unused cascade slot repeats the last real one
 		nc := size(c)
 		fu[fmt.Sprintf("n%d", i)], fu[fmt.Sprintf("size%d", i)] = nc, oceanCascades[c].size
-		foamBind = append(foamBind, graph.Binding{Name: fmt.Sprintf("fieldB%d", i), Resource: name("fftB_", c)})
+		if i < cascades {
+			views[i] = foamRead(name("fftB_", c), nc*nc)
+		} else {
+			views[i] = views[c]
+		}
+		foamBind = append(foamBind, graph.Binding{Name: fmt.Sprintf("fieldB%d", i), Resource: views[i]})
 		probeBind = append(probeBind, graph.Binding{Name: fmt.Sprintf("disp%d", i), Resource: name("fftA_", c)})
 	}
-	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"}, graph.Binding{Name: "wakeIn", Resource: "wakeB"})
+	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"}, graph.Binding{Name: "wakeIn", Resource: foamRead("wakeB", wakeN*wakeN)})
 	b.Pass(place(graph.Pass{Name: "foam", Type: "kernel", Kernel: "ocean_foam", Entry: "ocean_foam",
 		Bindings: foamBind, Uniforms: []graph.Uniform{b.Uniform("ocean_foam", "foam", fu)}}, "ocean_foam", foamWidth, foamWidth))
 	mipChain("", "foamTex", foamWidth, foamMips, "")

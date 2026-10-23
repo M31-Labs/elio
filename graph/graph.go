@@ -126,7 +126,14 @@ type Resource struct {
 	Feed string `json:"feed,omitempty"`
 }
 
-// Pass is a kernel pass, a mipmap pass or a repeat of other passes.
+// Pass is a kernel pass, a mipmap pass, a copy pass or a repeat of other passes.
+//
+// A copy pass (WebGL2 only) copies the buffer From into the buffer To, keeping
+// the elements in order but laying them out Width texels wide: both buffers
+// have the same element type and count, and To is declared with Width. A WebGL2
+// kernel pass may read a buffer only at its own width (Target.ElioWidth), so a
+// pass wider or narrower than the buffer it reads is given a copy made by an
+// earlier copy pass. A runner copies by texture blit or by reading and drawing.
 //
 // A repeat runs Body Count times with the param named Index set to 0 to
 // Count-1 (body uniform values refer to it as "param:<Index>"), and after
@@ -137,7 +144,7 @@ type Resource struct {
 // with every resource where it began (FrameSwaps aside).
 type Pass struct {
 	Name   string `json:"name"`
-	Type   string `json:"type"` // "kernel", "mipmap" or "repeat"
+	Type   string `json:"type"` // "kernel", "mipmap", "copy" or "repeat"
 	Kernel string `json:"kernel,omitempty"`
 	Entry  string `json:"entry,omitempty"`
 	// When is "always" (or empty, which is omitted from JSON), "param:<boolParam>" or "changed:<p1>,<p2>,...": the
@@ -149,6 +156,9 @@ type Pass struct {
 	Bindings []Binding `json:"bindings,omitempty"`
 	Uniforms []Uniform `json:"uniforms,omitempty"`
 	Resource string    `json:"resource,omitempty"` // mipmap: the texture
+	From     string    `json:"from,omitempty"`     // copy: the source buffer
+	To       string    `json:"to,omitempty"`       // copy: the destination buffer
+	Width    int       `json:"width,omitempty"`    // copy: the destination's width in texels
 
 	Count int         `json:"count,omitempty"` // repeat: iterations
 	Index string      `json:"index,omitempty"` // repeat: the iteration param
