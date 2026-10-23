@@ -250,7 +250,7 @@ struct OceanFoamParams {
         }
       }
       // Noise in the water frame, stretched along the streak angle: long streaks
-      // (24 m by 1.3 m), patches (6 m by 3 m) and fine grain (1.3 m), value noise
+      // (16 m by 1.6 m), patches (6 m by 3.5 m) and fine grain (1.4 m), value noise
       // on a lattice hashed with fract(sin()). World metres come from the integer
       // cell index, so the pattern holds still while the window moves.
       let fwx = sin(theta);
@@ -261,18 +261,18 @@ struct OceanFoamParams {
       let gb = gx * fwz - gz * fwx;
       var nsum = 0.0;
       for (var o: u32 = 0u; o < 3u; o = o + 1u) {
-        var sa = 24.0;
-        var sb = 1.3;
-        var amp = 0.55;
+        var sa = 16.0;
+        var sb = 1.6;
+        var amp = 0.35;
         if o == 1u {
           sa = 6.0;
-          sb = 3.0;
-          amp = 0.3;
+          sb = 3.5;
+          amp = 0.4;
         }
         if o == 2u {
-          sa = 1.3;
-          sb = 1.3;
-          amp = 0.15;
+          sa = 1.4;
+          sb = 1.4;
+          amp = 0.25;
         }
         let qa = ga / sa;
         let qb = gb / sb;

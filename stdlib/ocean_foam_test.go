@@ -262,7 +262,7 @@ func wakeFoamNoise(gx, gz, theta float64) float64 {
 		return v - math.Floor(v)
 	}
 	sum := 0.0
-	for o, oc := range [][3]float64{{24, 1.3, 0.55}, {6, 3, 0.3}, {1.3, 1.3, 0.15}} {
+	for o, oc := range [][3]float64{{16, 1.6, 0.35}, {6, 3.5, 0.4}, {1.4, 1.4, 0.25}} {
 		qa, qb := ga/oc[0], gb/oc[1]
 		ia, ib := math.Floor(qa), math.Floor(qb)
 		ta, tb := qa-ia, qb-ib
