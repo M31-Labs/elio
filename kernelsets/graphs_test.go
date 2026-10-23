@@ -65,9 +65,9 @@ func TestOceanGraphPassCounts(t *testing.T) {
 		"webgpu/high":   4 + 4 + 16 + 4 + (12 + 3*16) + 1 + 10 + 1 + wakeGPUPasses,
 		"webgpu/medium": 4 + 4 + 16 + 4 + (12 + 3*14) + 1 + 10 + 1 + wakeGPUPasses,
 		"webgpu/low":    3 + 3 + 12 + 3 + 3*12 + 1 + 10 + 1 + wakeGPUPasses,
-		"webgl2/high":   4 + 4 + (24 + 3*32) + 4 + 8 + 1 + 1 + wakeGL2Passes + 5,
-		"webgl2/medium": 4 + 4 + (24 + 3*28) + 4 + 8 + 1 + 1 + wakeGL2Passes + 5,
-		"webgl2/low":    3 + 3 + 3*24 + 3 + 6 + 1 + 1 + wakeGL2Passes + 4,
+		"webgl2/high":   4 + 4 + (24 + 3*32) + 4 + 8 + 1 + 1 + wakeGL2Passes,
+		"webgl2/medium": 4 + 4 + (24 + 3*28) + 4 + 8 + 1 + 1 + wakeGL2Passes,
+		"webgl2/low":    3 + 3 + 3*24 + 3 + 6 + 1 + 1 + wakeGL2Passes,
 	}
 	for key, n := range want {
 		flat, err := graph.Expand(gs[key])
@@ -271,42 +271,20 @@ func TestOceanGraphWrappedOrigins(t *testing.T) {
 	}
 }
 
-// The WebGL2 foam pass is 1,024 wide, so every buffer it reads at another width
-// goes through a copy pass that widens it first (a pass reads a buffer only at
-// its own width).
-func TestOceanGraphWidthCopies(t *testing.T) {
+// The WebGL2 foam pass is 1,024 wide and reads the cascade and wake buffers at
+// their own widths (each read buffer has a width uniform), so no graph copies a
+// buffer to widen it.
+func TestOceanGraphNoWidthCopies(t *testing.T) {
 	gs, _ := loadGraphs(t)
 	for _, key := range graphKeys {
-		g := gs[key]
-		flat, err := graph.Expand(g)
+		flat, err := graph.Expand(gs[key])
 		if err != nil {
 			t.Fatal(err)
 		}
-		var from []string
-		foamAt := -1
-		for i, p := range flat.Passes {
+		for _, p := range flat.Passes {
 			if p.Type == "copy" {
-				from = append(from, p.From)
-				if p.Width != 1024 || foamAt >= 0 {
-					t.Errorf("%s: copy %s width %d (foam at %d)", key, p.Name, p.Width, foamAt)
-				}
+				t.Errorf("%s: copy pass %s; a gather pass reads buffers at their own widths", key, p.Name)
 			}
-			if p.Name == "foam" {
-				foamAt = i
-			}
-		}
-		if g.Backend == "webgpu" {
-			if len(from) != 0 {
-				t.Errorf("%s: copies %v on webgpu", key, from)
-			}
-			continue
-		}
-		want := []string{"fftB_0", "fftB_1", "fftB_2", "fftB_3", "wakeB"}
-		if g.Tier == "low" {
-			want = []string{"fftB_0", "fftB_1", "fftB_2", "wakeB"}
-		}
-		if strings.Join(from, ",") != strings.Join(want, ",") {
-			t.Errorf("%s: copies of %v, want %v", key, from, want)
 		}
 	}
 }

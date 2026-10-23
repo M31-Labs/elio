@@ -22,10 +22,11 @@ func TestEmitScaleBias(t *testing.T) {
 		"uniform uint elio_width;",
 		"uniform highp sampler2D src_tex;",
 		"uniform uint src_len;",
+		"uniform uint src_w;",
 		"layout(std140) uniform Params_ubo {",
 		"} params;",
 		"vec4 src_at(uint i) {",
-		"texelFetch(src_tex, ivec2(int(i % elio_width), int(i / elio_width)), 0)",
+		"texelFetch(src_tex, ivec2(int(i % src_w), int(i / src_w)), 0)",
 		"layout(location = 0) out vec4 dst_out;",
 		"dst_out = vec4(0.0);",
 		"uint i = " + wantFragIndex + ";",
@@ -40,7 +41,7 @@ func TestEmitScaleBias(t *testing.T) {
 	if len(lay.Inputs) != 1 || len(lay.Outputs) != 1 || len(lay.Uniforms) != 1 {
 		t.Fatalf("layout = %+v", lay)
 	}
-	if got := lay.Inputs[0]; got.Name != "src" || got.Elem != "vec4" || got.Sampler != "src_tex" || got.Length != "src_len" {
+	if got := lay.Inputs[0]; got.Name != "src" || got.Elem != "vec4" || got.Sampler != "src_tex" || got.Length != "src_len" || got.Width != "src_w" {
 		t.Errorf("input = %+v", got)
 	}
 	if got := lay.Outputs[0]; got.Name != "dst" || got.Elem != "vec4" || got.Location != 0 || got.Variable != "dst_out" {

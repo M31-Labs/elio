@@ -201,7 +201,8 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 	b.Value("hullLength", graph.F32, 200).Value("hullBeam", graph.F32, 30)
 	b.Value("wakeCell", graph.F32, wakeCellDefault).Value("wakeDepth", graph.F32, 0.4).Value("wakeGravity", graph.F32, 9.81)
 	b.Value("wakeAlpha", graph.F32, 0.02).Value("wakeMinLambdaCells", graph.F32, 8)
-	b.Value("wakeFoamGain", graph.F32, 1).Value("wakeFoamTau", graph.F32, 45)
+	b.Value("wakeFoamGain", graph.F32, 1).Value("wakeFoamTau", graph.F32, 48)
+	b.Value("wakeDiffuse", graph.F32, 1.5).Value("wakeJitter", graph.F32, 1.0)
 	b.Expr("wakeOn", graph.F32, "mul", ref("wakeEnabled"), 1.0)
 	b.Expr("wakeFoamGainEff", graph.F32, "mul", ref("wakeEnabled"), ref("wakeFoamGain"))
 	b.Delta("wakeEdge", graph.I32, "wakeEnabled")
@@ -379,7 +380,8 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 			"cell": ref("wakeCell"), "dt": ref("wakeDt"), "tau": ref("wakeFoamTau"), "depth": ref("wakeDepth"),
 			"hullU": ref("wakeHullU"), "hullV": ref("wakeHullV"), "heading": ref("hullHeading"), "speed": ref("hullSpeed"),
 			"hullLen": ref("hullLength"), "hullBeam": ref("hullBeam"), "srcLength": ref("wakeSrcLength"), "srcBeam": ref("wakeSrcBeam"),
-			"fullSpeed": wakeFullSpeed, "foamSpeed": wakeFoamSpeed})}}, "wake_source"))
+			"fullSpeed": wakeFullSpeed, "foamSpeed": wakeFoamSpeed,
+			"diffuse": ref("wakeDiffuse"), "jitter": ref("wakeJitter")})}}, "wake_source"))
 	wfk, wgk := fmt.Sprintf("fft_compute_%d", wakeN), fmt.Sprintf("fft_gather_%d", wakeN)
 	wakeFFT := func(label, src, dst string) {
 		if gpu {
@@ -433,18 +435,6 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 	fu["wakeWidth"], fu["wakeGain"], fu["wakeCell"] = wakeN, ref("wakeFoamGainEff"), ref("wakeCell")
 	fu["wakeRelX"], fu["wakeRelZ"] = ref("wakeRelX"), ref("wakeRelZ")
 	fu["wakeOriginX"], fu["wakeOriginZ"] = ref("wakeOriginModX"), ref("wakeOriginModZ")
-	// WebGL2: the foam pass is foamWidth wide and reads each buffer at that
-	// width, so it reads copies made by copy passes (the same elements laid out
-	// foamWidth texels wide). WebGPU reads the buffers directly.
-	foamRead := func(src string, count int) string {
-		if gpu {
-			return src
-		}
-		view := src + "_w"
-		buf(view, "vec4<f32>", count, foamWidth)
-		b.Pass(graph.Pass{Name: "foam.copy." + src, Type: "copy", From: src, To: view, Width: foamWidth})
-		return view
-	}
 	foamBind := []graph.Binding{{Name: "foamIn", Resource: "foamA"}}
 	probeBind := []graph.Binding{}
 	var views [4]string
@@ -453,14 +443,14 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		nc := size(c)
 		fu[fmt.Sprintf("n%d", i)], fu[fmt.Sprintf("size%d", i)] = nc, oceanCascades[c].size
 		if i < cascades {
-			views[i] = foamRead(name("fftB_", c), nc*nc)
+			views[i] = name("fftB_", c)
 		} else {
 			views[i] = views[c]
 		}
 		foamBind = append(foamBind, graph.Binding{Name: fmt.Sprintf("fieldB%d", i), Resource: views[i]})
 		probeBind = append(probeBind, graph.Binding{Name: fmt.Sprintf("disp%d", i), Resource: name("fftA_", c)})
 	}
-	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"}, graph.Binding{Name: "wakeIn", Resource: foamRead("wakeB", wakeN*wakeN)})
+	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"}, graph.Binding{Name: "wakeIn", Resource: "wakeB"})
 	b.Pass(place(graph.Pass{Name: "foam", Kernel: "ocean_foam",
 		Bindings: foamBind, Uniforms: []graph.Uniform{b.Uniform("ocean_foam", "foam", fu)}}, "ocean_foam", foamWidth, foamWidth))
 	mipChain("", "foamTex", foamWidth, foamMips, "")

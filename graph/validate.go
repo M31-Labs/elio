@@ -444,9 +444,6 @@ func (v *validator) checkPass(p Pass) {
 			v.errf("pass %q: binding %q: level %d, resource %q has %d", p.Name, mb.Name, b.Level, r.Name, r.MipLevels)
 			continue
 		}
-		if _, isArr := mb.Type.(ir.Array); isArr && web2 && p.Target != nil && mb.Access == ir.Read && r.Width != p.Target.ElioWidth {
-			v.errf("pass %q: reads buffer %q at width %d, but the pass is %d wide; make a copy of it at that width with a copy pass", p.Name, r.Name, r.Width, p.Target.ElioWidth)
-		}
 		if r.Kind == "buffer" && b.Level != 0 {
 			v.errf("pass %q: binding %q: a buffer has no levels", p.Name, mb.Name)
 		}

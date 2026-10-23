@@ -29,13 +29,15 @@
 // formed from sums over cascades (a per-cascade Jacobian cannot be combined):
 //   J = (1 + lambda S_xx)(1 + lambda S_zz) - (lambda S_xz)^2
 //   S_xx, S_zz, S_xz = sums over cascades of dDx/dx, dDz/dz, dDx/dz
-// The texture holds (f, J, wake, 1); wake is the wake foam level, 0 without one.
+// The texture holds (f, J, wf, 1); wf is the wake foam coverage, 0 without a wake.
 //
-// Ship wake. With wakeWidth > 0 and wakeGain > 0 the foam also follows the wake
-// window's turbulence T (the z lane of wakeIn, a wakeWidth^2 vec4 buffer in the
-// toroidal layout of wake_source): f = max(f, saturate(wakeGain T)), where T is
-// bilinear at the foam cell centre in wake cells (cell size wakeCell metres) and
-// 0 outside the wake window. The wake window's turbulence persists for its own
+// Ship wake. With wakeWidth > 0 and wakeGain > 0 the texture's wake lane wf is the
+// wake foam: the wake window's turbulence T (the z lane of wakeIn, a wakeWidth^2
+// vec4 buffer in the toroidal layout of wake_source), bilinear at the foam cell
+// centre in wake cells (cell size wakeCell metres) and 0 outside the wake window,
+// compared with a noise threshold (see the code). wf is separate from f: the foam
+// state f holds crest foam only, so the wake's foam follows the churned water
+// instead of lingering. The wake window's turbulence persists for its own
 // time constant, so the trail outlives the crest foam's tau. Positions use
 // small numbers only: wakeRelX/Z is the foam window origin in metres from the
 // wake window's origin corner (evaluated in float64 by the host), and
@@ -209,7 +211,8 @@ struct OceanFoamParams {
   if entered { f = 0.0; }
   f = min(f + clamp((foam.threshold - jac) * foam.gain, 0.0, 1.0), 1.0);
 
-  // Ship wake: foam follows the wake's turbulence (the z lane of wakeIn).
+  // Ship wake: foam follows the wake's turbulence (the z lane of wakeIn) where it
+  // beats a streaky noise threshold; wf is that coverage, 0..1.
   var wf = 0.0;
   if foam.wakeWidth > 0u {
     if foam.wakeGain > 0.0 {
@@ -221,6 +224,7 @@ struct OceanFoamParams {
       let fx = px - x0;
       let fz = pz - z0;
       var turb = 0.0;
+      var theta = 0.0;
       for (var c: u32 = 0u; c < 4u; c = c + 1u) {
         var cu = i32(x0);
         var cv = i32(z0);
@@ -234,14 +238,66 @@ struct OceanFoamParams {
               if cv < ww {
                 let bu = (cu + foam.wakeOriginX) % ww;
                 let bv = (cv + foam.wakeOriginZ) % ww;
-                turb = turb + wgt * wakeIn[u32(bv * ww + bu)].z;
+                let wc = wakeIn[u32(bv * ww + bu)];
+                turb = turb + wgt * wc.z;
+                // The streak angle of the nearest wake cell (angles do not blend).
+                if wgt >= 0.25 {
+                  theta = wc.w;
+                }
               }
             }
           }
         }
       }
-      wf = clamp(foam.wakeGain * turb, 0.0, 1.0);
-      f = max(f, wf);
+      // Noise in the water frame, stretched along the streak angle: long streaks
+      // (24 m by 1.3 m), patches (6 m by 3 m) and fine grain (1.3 m), value noise
+      // on a lattice hashed with fract(sin()). World metres come from the integer
+      // cell index, so the pattern holds still while the window moves.
+      let fwx = sin(theta);
+      let fwz = cos(theta);
+      let gx = (f32(foam.originX + i32(ru)) + 0.5) * foam.cell;
+      let gz = (f32(foam.originZ + i32(rv)) + 0.5) * foam.cell;
+      let ga = gx * fwx + gz * fwz;
+      let gb = gx * fwz - gz * fwx;
+      var nsum = 0.0;
+      for (var o: u32 = 0u; o < 3u; o = o + 1u) {
+        var sa = 24.0;
+        var sb = 1.3;
+        var amp = 0.55;
+        if o == 1u {
+          sa = 6.0;
+          sb = 3.0;
+          amp = 0.3;
+        }
+        if o == 2u {
+          sa = 1.3;
+          sb = 1.3;
+          amp = 0.15;
+        }
+        let qa = ga / sa;
+        let qb = gb / sb;
+        let ia = floor(qa);
+        let ib = floor(qb);
+        let ta = qa - ia;
+        let tb = qb - ib;
+        let ea = ta * ta * (3.0 - 2.0 * ta);
+        let eb = tb * tb * (3.0 - 2.0 * tb);
+        let ma = ia - 289.0 * floor(ia / 289.0);
+        let mb = ib - 289.0 * floor(ib / 289.0);
+        let ph = 37.719 * f32(o);
+        let h00 = fract(sin(12.9898 * ma + 78.233 * mb + ph) * 43758.5453);
+        let h10 = fract(sin(12.9898 * (ma + 1.0) + 78.233 * mb + ph) * 43758.5453);
+        let h01 = fract(sin(12.9898 * ma + 78.233 * (mb + 1.0) + ph) * 43758.5453);
+        let h11 = fract(sin(12.9898 * (ma + 1.0) + 78.233 * (mb + 1.0) + ph) * 43758.5453);
+        nsum = nsum + amp * mix(mix(h00, h10, ea), mix(h01, h11, ea), eb);
+      }
+      // Foam where the turbulence beats a threshold that the noise moves between
+      // 0.12 and 0.88: dense water is white, thin water breaks into streaks and
+      // flecks with ragged edges. The ramp is soft (0.4 wide) so the surface can
+      // dissolve it further per pixel.
+      let nn = clamp((nsum - 0.25) / 0.5, 0.0, 1.0);
+      let thr = 0.12 + 0.76 * nn;
+      wf = smoothstep(0.0, 0.4, foam.wakeGain * turb - thr);
     }
   }
   foamOut[i] = f;

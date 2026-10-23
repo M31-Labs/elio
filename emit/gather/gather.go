@@ -2,9 +2,10 @@
 // 3.00 fragment shader, so it can run on WebGL2 (which has no compute) as one
 // fullscreen render pass over float textures.
 //
-// Each storage buffer becomes a 2D texture of width `elio_width`: element i is
-// texel (i % elio_width, i / elio_width). A read buffer is a sampler2D read
-// with texelFetch. A written buffer, or a storage texture written as
+// Each storage buffer becomes a 2D texture. A written buffer is `elio_width`
+// texels wide (the pass's own width). A read buffer is a sampler2D read with
+// texelFetch and has its own width, a uniform `<name>_w`: element i is texel
+// (i % <name>_w, i / <name>_w), so a pass can read buffers of any layout. A written buffer, or a storage texture written as
 // textureStore(t, vec2u(i % W, i / W), v), is a color attachment (RGBA32F or
 // RGBA16F; at most 32 bytes per pixel across all outputs).
 // Invocation gid.x is the pixel's linear index, so every invocation writes its
@@ -160,9 +161,9 @@ func (e *emitter) emit() (string, Layout, error) {
 				Name: b.Name, Kind: "texture", Elem: "vec4", Sampler: safe(b.Name), Binding: b.Binding,
 			})
 		default:
-			fmt.Fprintf(w, "uniform highp sampler2D %s_tex;\nuniform uint %s_len;\n", b.Name, b.Name)
+			fmt.Fprintf(w, "uniform highp sampler2D %s_tex;\nuniform uint %s_len;\nuniform uint %s_w;\n", b.Name, b.Name, b.Name)
 			lay.Inputs = append(lay.Inputs, Buffer{
-				Name: b.Name, Kind: "buffer", Elem: elemKind(b), Sampler: b.Name + "_tex", Length: b.Name + "_len", Binding: b.Binding,
+				Name: b.Name, Kind: "buffer", Elem: elemKind(b), Sampler: b.Name + "_tex", Length: b.Name + "_len", Width: b.Name + "_w", Binding: b.Binding,
 			})
 		}
 	}
@@ -178,8 +179,8 @@ func (e *emitter) emit() (string, Layout, error) {
 		case "vec4":
 			ty, sw = "vec4", ""
 		}
-		fmt.Fprintf(w, "%s %s_at(uint i) {\n  return texelFetch(%s, ivec2(int(i %% elio_width), int(i / elio_width)), 0)%s;\n}\n\n",
-			ty, in.Name, in.Sampler, sw)
+		fmt.Fprintf(w, "%s %s_at(uint i) {\n  return texelFetch(%s, ivec2(int(i %% %s), int(i / %s)), 0)%s;\n}\n\n",
+			ty, in.Name, in.Sampler, in.Width, in.Width, sw)
 	}
 
 	w.WriteString("void main() {\n")

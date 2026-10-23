@@ -111,12 +111,14 @@ kernel does not qualify.
 **Host contract.** `gather.Emit(module, kernel)` returns the shader source and
 a `Layout`.
 
-- Every buffer is a 2D float texture, `elio_width` texels wide. Element `i` is
-  texel `(i % elio_width, i / elio_width)`. Set `uniform uint elio_width`
-  before the pass.
+- Every buffer is a 2D float texture. Written buffers are `elio_width` texels
+  wide (set `uniform uint elio_width` before the pass). A read buffer has its
+  own width: element `i` is texel `(i % src_w, i / src_w)`, so a pass can read
+  buffers laid out at any width.
 - Each entry in `Layout.Inputs` is a `sampler2D` uniform (`Sampler`, for example
-  `src_tex`) and a `uint` uniform with the element count (`Length`, for example
-  `src_len`). Bind the texture with `NEAREST` filtering.
+  `src_tex`), a `uint` uniform with the element count (`Length`, for example
+  `src_len`) and a `uint` uniform with the buffer's texels per row (`Width`, for
+  example `src_w`). Bind the texture with `NEAREST` filtering.
 - Each entry in `Layout.Outputs` is a color attachment at `Location`. Unused
   channels are zero.
 - Each entry in `Layout.Uniforms` is a `std140` block. Find it with
@@ -146,10 +148,11 @@ layout(std140) uniform Params_ubo {
 } params;
 uniform highp sampler2D src_tex;
 uniform uint src_len;
+uniform uint src_w;
 layout(location = 0) out vec4 dst_out;
 
 vec4 src_at(uint i) {
-  return texelFetch(src_tex, ivec2(int(i % elio_width), int(i / elio_width)), 0);
+  return texelFetch(src_tex, ivec2(int(i % src_w), int(i / src_w)), 0);
 }
 
 void main() {

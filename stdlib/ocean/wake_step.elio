@@ -20,7 +20,7 @@
 //
 // Inputs. qIn = (Q[s], 0, 0, 0) per cell, in 1/m times metres: Q has the unit
 // of 1/length, so g Q has m/s^2 per metre of s. cleanIn is wake_source's cleaned
-// state (h, h_prev, turbulence, 0). Output state = (h', h, turbulence, 0).
+// state (h, h_prev, turbulence, streak angle). Output state = (h', h, turbulence, streak angle).
 // The texture holds (h', dh'/dx, dh'/dz, turbulence) at the cell, with the
 // gradients by central differences of h' over +-1 cell (m per m). They need h'
 // at the four neighbours, which the kernel recomputes from qIn and cleanIn (the
@@ -89,6 +89,6 @@ struct WakeStepParams {
     if c == 4u { h4 = hn; }
   }
   let own = cleanIn[i];
-  stateOut[i] = vec4(h0, own.x, own.z, 0.0);
+  stateOut[i] = vec4(h0, own.x, own.z, own.w);
   textureStore(wakeTex, vec2u(i % w, i / w), vec4(h0, (h1 - h2) / (2.0 * wstep.cell), (h3 - h4) / (2.0 * wstep.cell), own.z));
 }
