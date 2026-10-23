@@ -172,22 +172,7 @@ func (v *validator) checkParams() {
 				v.errf("param %q: a frame source is f32", p.Name)
 			}
 		case SourceExpr:
-			want, ok := exprOps[s.Op]
-			if !ok {
-				v.errf("param %q: unknown op %q", p.Name, s.Op)
-			} else if len(s.Args) != want {
-				v.errf("param %q: op %s takes %d args, got %d", p.Name, s.Op, want, len(s.Args))
-			}
-			for _, a := range s.Args {
-				switch x := a.(type) {
-				case string:
-					earlierNumeric(x)
-				default:
-					if _, ok := number(a); !ok {
-						v.errf("param %q: arg %v is not a number or a param reference", p.Name, a)
-					}
-				}
-			}
+			v.checkExpr(p.Name, Expr{Op: s.Op, Args: s.Args}, earlierNumeric)
 			if !numericType(p.Type) {
 				v.errf("param %q: an expression is numeric", p.Name)
 			}
@@ -210,6 +195,39 @@ func (v *validator) checkParams() {
 			v.errf("param %q: unknown source kind %q", p.Name, s.Kind)
 		}
 		v.params[p.Name] = p
+	}
+}
+
+// asExpr reads a nested expression: an Expr, or the map a JSON decode gives.
+func asExpr(a any) (Expr, bool) {
+	switch x := a.(type) {
+	case Expr:
+		return x, true
+	case map[string]any:
+		op, _ := x["op"].(string)
+		args, _ := x["args"].([]any)
+		_, hasOp := x["op"]
+		return Expr{Op: op, Args: args}, hasOp
+	}
+	return Expr{}, false
+}
+
+// checkExpr checks an expression's op, arity and arguments, recursively.
+func (v *validator) checkExpr(param string, e Expr, ref func(string)) {
+	want, ok := exprOps[e.Op]
+	if !ok {
+		v.errf("param %q: unknown op %q", param, e.Op)
+	} else if len(e.Args) != want {
+		v.errf("param %q: op %s takes %d args, got %d", param, e.Op, want, len(e.Args))
+	}
+	for _, a := range e.Args {
+		if s, isStr := a.(string); isStr {
+			ref(s)
+		} else if sub, isExpr := asExpr(a); isExpr {
+			v.checkExpr(param, sub, ref)
+		} else if _, isNum := number(a); !isNum {
+			v.errf("param %q: arg %v is not a number, a param reference or an expression", param, a)
+		}
 	}
 }
 

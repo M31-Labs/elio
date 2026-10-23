@@ -76,7 +76,7 @@ type Source struct {
 	Value float64 `json:"value"`          // value
 	Name  string  `json:"name,omitempty"` // frame
 	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor, sin, cos (one; sin and cos take radians); mod is floored (the result takes the divisor's sign); the runner evaluates in f64
-	Args  []any   `json:"args,omitempty"` // expr: "param:<name>" or a number
+	Args  []any   `json:"args,omitempty"` // expr: "param:<name>", a number or an Expr
 	Of    string  `json:"of,omitempty"`   // accumulate, delta: "param:<name>"
 	// Node and Field name a scene node and one of its pose fields (node source).
 	// The param is f32 and the runner reads it from the scene each frame, in
@@ -90,6 +90,19 @@ type Source struct {
 
 // NodeFields are the pose fields a node source may read.
 var NodeFields = []string{"x", "z", "heading", "speed"}
+
+// Expr is an expression used as an argument of another expression (Source.Args
+// or an Expr's own Args), so a chain of single-use steps is one param. An
+// argument is "param:<name>", a number, or an Expr; the runner evaluates it
+// depth first in f64, with the same ops as an expr source. Decoded from JSON an
+// Expr is a map with keys "op" and "args".
+type Expr struct {
+	Op   string `json:"op"`
+	Args []any  `json:"args"`
+}
+
+// E builds an Expr.
+func E(op string, args ...any) Expr { return Expr{Op: op, Args: args} }
 
 // MarshalJSON writes only the fields that belong to the source's kind.
 func (s Source) MarshalJSON() ([]byte, error) {
