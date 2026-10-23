@@ -75,7 +75,7 @@ type Source struct {
 	Kind  string  `json:"kind"`
 	Value float64 `json:"value"`          // value
 	Name  string  `json:"name,omitempty"` // frame
-	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor (one); mod is floored (the result takes the divisor's sign); the runner evaluates in f64
+	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor, sin, cos (one; sin and cos take radians); mod is floored (the result takes the divisor's sign); the runner evaluates in f64
 	Args  []any   `json:"args,omitempty"` // expr: "param:<name>" or a number
 	Of    string  `json:"of,omitempty"`   // accumulate, delta: "param:<name>"
 	// Node and Field name a scene node and one of its pose fields (node source).

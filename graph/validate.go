@@ -16,7 +16,7 @@ const maxDispatch = 65535
 
 var (
 	frameSources = map[string]bool{"time": true, "dt": true, "cameraX": true, "cameraY": true, "cameraZ": true}
-	exprOps      = map[string]int{"add": 2, "sub": 2, "mul": 2, "div": 2, "mod": 2, "min": 2, "max": 2, "floor": 1}
+	exprOps      = map[string]int{"add": 2, "sub": 2, "mul": 2, "div": 2, "mod": 2, "min": 2, "max": 2, "floor": 1, "sin": 1, "cos": 1}
 	bufferElems  = map[string]bool{"f32": true, "vec2<f32>": true, "vec4<f32>": true}
 	texFormats   = map[string]bool{"rgba16float": true, "rgba32float": true, "r32float": true}
 )

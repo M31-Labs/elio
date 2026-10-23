@@ -89,7 +89,7 @@ func (b *Builder) Node(name, node, field string) *Builder {
 }
 
 // Expr declares a param computed each frame by op (add, sub, mul, div, mod,
-// min, max over two args; floor over one) from earlier params (Ref) or
+// min, max over two args; floor, sin, cos over one) from earlier params (Ref) or
 // numbers.
 func (b *Builder) Expr(name, typ, op string, args ...any) *Builder {
 	b.g.Params = append(b.g.Params, Param{Name: name, Type: typ, Source: Source{Kind: SourceExpr, Op: op, Args: args}})

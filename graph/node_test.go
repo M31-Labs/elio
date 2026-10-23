@@ -64,3 +64,23 @@ func TestBoolParamUsableAsNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// sin and cos take one argument, in radians, so a graph can turn a heading
+// into a direction.
+func TestTrigOpsAreUnary(t *testing.T) {
+	ok := withParams(
+		graph.Param{Name: "yaw", Type: graph.F32, Source: graph.Source{Kind: graph.SourceValue}},
+		graph.Param{Name: "fwdX", Type: graph.F32, Source: graph.Source{Kind: graph.SourceExpr, Op: "sin", Args: []any{"param:yaw"}}},
+		graph.Param{Name: "fwdZ", Type: graph.F32, Source: graph.Source{Kind: graph.SourceExpr, Op: "cos", Args: []any{"param:yaw"}}},
+	)
+	if err := graph.Validate(ok, kernels(t)); err != nil {
+		t.Fatal(err)
+	}
+	bad := withParams(
+		graph.Param{Name: "yaw", Type: graph.F32, Source: graph.Source{Kind: graph.SourceValue}},
+		graph.Param{Name: "fwdX", Type: graph.F32, Source: graph.Source{Kind: graph.SourceExpr, Op: "sin", Args: []any{"param:yaw", 1.0}}},
+	)
+	if err := graph.Validate(bad, kernels(t)); err == nil || !strings.Contains(err.Error(), "takes 1 args") {
+		t.Errorf("sin with two args: %v", err)
+	}
+}
