@@ -127,6 +127,14 @@ func fieldDecl(f ir.Field) string {
 
 func (e *emitter) emitBinding(b ir.Binding) {
 	name := safe(b.Name)
+	if tex, ok := b.Type.(ir.StorageTexture); ok {
+		fmt.Fprintf(&e.b, "layout(%s, binding = %d) uniform writeonly image2D %s;\n", glImageFormat(tex.Format), b.Binding, name)
+		return
+	}
+	if _, ok := b.Type.(ir.Texture2D); ok {
+		fmt.Fprintf(&e.b, "layout(binding = %d) uniform sampler2D %s;\n", b.Binding, name)
+		return
+	}
 	// Block-type names live in their own namespace and aren't reserved, so use
 	// the raw name there; the instance/member name is escaped. This also avoids
 	// "__" (raw "_ssbo" suffix on an escaped "name_" would read "name__ssbo").
@@ -151,6 +159,19 @@ func (e *emitter) emitBinding(b ir.Binding) {
 		fmt.Fprintf(&e.b, "layout(std430, binding = %d) %sbuffer %s_ssbo { %s %s[]; };\n",
 			b.Binding, access, b.Name, storageElem(elem), name)
 	}
+}
+
+// glImageFormat maps a storage texture format to its GLSL image layout qualifier.
+func glImageFormat(f string) string {
+	switch f {
+	case "rgba16float":
+		return "rgba16f"
+	case "rgba32float":
+		return "rgba32f"
+	case "r32float":
+		return "r32f"
+	}
+	return f
 }
 
 func storageElem(t ir.Type) string {
@@ -318,6 +339,24 @@ func (e *emitter) call(c ir.Call) string {
 		if len(c.Args) == 2 {
 			return fmt.Sprintf("atomicAdd(%s, %s)", e.expr(c.Args[0]), e.expr(c.Args[1]))
 		}
+	case "textureStore":
+		if len(c.Args) == 3 {
+			return fmt.Sprintf("imageStore(%s, ivec2(%s), %s)", e.expr(c.Args[0]), e.expr(c.Args[1]), e.expr(c.Args[2]))
+		}
+	case "textureLoad":
+		if len(c.Args) == 3 {
+			return fmt.Sprintf("texelFetch(%s, ivec2(%s), int(%s))", e.expr(c.Args[0]), e.expr(c.Args[1]), e.expr(c.Args[2]))
+		}
+	case "textureDimensions":
+		_, sampled := e.infer(c.Args[0]).(ir.Texture2D)
+		switch {
+		case len(c.Args) == 2:
+			return fmt.Sprintf("uvec2(textureSize(%s, int(%s)))", e.expr(c.Args[0]), e.expr(c.Args[1]))
+		case len(c.Args) == 1 && sampled:
+			return fmt.Sprintf("uvec2(textureSize(%s, 0))", e.expr(c.Args[0]))
+		case len(c.Args) == 1:
+			return fmt.Sprintf("uvec2(imageSize(%s))", e.expr(c.Args[0]))
+		}
 	case "select":
 		// WGSL select(falseVal, trueVal, cond) → GLSL ternary (cond ? trueVal : falseVal).
 		if len(c.Args) == 3 {
@@ -394,6 +433,10 @@ func (e *emitter) infer(ex ir.Expr) ir.Type {
 			return ir.F32
 		case "atomicAdd":
 			return ir.U32
+		case "textureDimensions":
+			return ir.Vec{N: 2, Elem: ir.U32}
+		case "textureLoad":
+			return ir.Vec{N: 4, Elem: ir.F32}
 		case "select":
 			// select(falseVal, trueVal, cond): type is the value operands' type.
 			if len(x.Args) >= 2 {

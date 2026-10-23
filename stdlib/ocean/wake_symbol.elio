@@ -1,0 +1,56 @@
+// wake_symbol.elio — wake_symbol: multiply a spectrum by the deep-water
+// operator Q = |k|. One invocation per texel of an n x n grid. Gather-compatible
+// (one vec4 output, 16 bytes per pixel).
+//
+// How the wake step uses it. For a real field s on an n x n periodic grid, with
+// the unnormalized inverse FFT T[x] = sum_k a_k e^{+i k.x} that the ocean uses,
+//   T[s](k) = sum_x s_x e^{+i k.x} = conj(F(k)),   F = the forward transform.
+// So Q[s] = (1/n^2) T[ |k| F ], and the three passes
+//   u = T[s]            (inverse FFT of the real surface, first complex slot)
+//   g = |k| conj(u) / n^2   (this kernel)
+//   Q[s] = Re T[g]      (inverse FFT, real part of the first complex slot)
+// give the exact discrete operator, with no kernel truncation: the deep-water
+// dispersion omega^2 = g |k| holds to the grid's Nyquist limit.
+//
+// Wavenumbers. Texel (ix, iz) carries the signed index sx = ix for ix <= n/2
+// and ix - n above; k = 2 pi (sx, sz) / length in rad/m, where window is the
+// window width in metres (n cell). The zero wavenumber and the Nyquist row and
+// column (ix = n/2 or iz = n/2) are zeroed, as the ocean zeroes its Nyquist
+// lines. Only the first complex slot is used; the second is written as zero.
+
+struct WakeSymbolParams {
+  n: u32;
+  _pad0: u32;
+  _pad1: u32;
+  _pad2: u32;
+  window: f32;
+  _pad3: f32;
+  _pad4: f32;
+  _pad5: f32;
+}
+
+@group(0) @binding(0) uniform sym: WakeSymbolParams;
+@group(0) @binding(1) storage read fftIn: []vec4;
+@group(0) @binding(2) storage read_write fftOut: []vec4;
+
+@workgroup(64) kernel wake_symbol(gid: global_invocation_id) {
+  let i = gid.x;
+  let n = sym.n;
+  if i >= n * n { return; }
+  let ix = i % n;
+  let iz = i / n;
+  var sx = i32(ix);
+  var sz = i32(iz);
+  if ix > n / 2u { sx = sx - i32(n); }
+  if iz > n / 2u { sz = sz - i32(n); }
+  var gain = 0.0;
+  if ix != n / 2u {
+    if iz != n / 2u {
+      let kx = 6.283185307179586 * f32(sx) / sym.window;
+      let kz = 6.283185307179586 * f32(sz) / sym.window;
+      gain = sqrt(kx * kx + kz * kz) / (f32(n) * f32(n));
+    }
+  }
+  let u = fftIn[i];
+  fftOut[i] = vec4(gain * u.x, 0.0 - gain * u.y, 0.0, 0.0);
+}

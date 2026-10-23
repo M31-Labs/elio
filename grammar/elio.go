@@ -5,7 +5,9 @@
 // Surface (Go-flavored types avoid WGSL's <…> generic ambiguity):
 //
 //	struct Name { field: type; … }
-//	@group(g) @binding(b) uniform|storage [read|read_write] name: T;
+//	@group(g) @binding(b) uniform|storage [read|read_write|write] name: T;
+//	@group(g) @binding(b) texture name: tex2d;   // sampled texture_2d<f32>, read with textureLoad
+//	@group(g) @binding(b) storage write name: tex2d_<format>;   // write-only storage texture
 //	@workgroup(x[,y,z]) kernel name(p: builtin, …) { stmts }
 //
 // # Expression structure: primary + postfix chain (NOT supertype left-recursion)
@@ -66,7 +68,8 @@ func ElioGrammar() *grammargen.Grammar {
 	))
 	g.Define("binding_qualifier", choice(
 		s("uniform"),
-		seq(s("storage"), opt(choice(s("read"), s("read_write")))),
+		s("texture"),
+		seq(s("storage"), opt(choice(s("read"), s("read_write"), s("write")))),
 	))
 
 	// @workgroup(x[,y,z]) kernel name(param: builtin, …) { body }
@@ -101,7 +104,7 @@ func ElioGrammar() *grammargen.Grammar {
 	g.Define("statement", choice(
 		sym("let_stmt"), sym("var_stmt"), sym("return_stmt"),
 		sym("break_stmt"), sym("barrier_stmt"), sym("if_stmt"),
-		sym("for_stmt"), sym("while_stmt"), sym("assign_stmt"),
+		sym("for_stmt"), sym("while_stmt"), sym("assign_stmt"), sym("call_stmt"),
 	))
 
 	g.Define("let_stmt", seq(
@@ -130,6 +133,8 @@ func ElioGrammar() *grammargen.Grammar {
 	g.Define("while_stmt", seq(
 		s("while"), field("cond", sym("expression")), field("body", sym("block")),
 	))
+	// A call evaluated for its effect: textureStore(t, c, v);
+	g.Define("call_stmt", seq(sym("call"), s(";")))
 	g.Define("assign_stmt", seq(sym("assign_inner"), s(";")))
 	g.Define("assign_inner", seq(
 		field("target", sym("expression")),

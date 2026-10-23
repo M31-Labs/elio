@@ -1,0 +1,213 @@
+// wake_source.elio — wake_source: the first pass of one ship-wake step. One
+// invocation per texel of a width x width toroidal window in the water frame.
+// Gather-compatible: it reads the wake state `wakeIn` and writes two vec4
+// buffers (32 bytes per pixel): `fftOut` (the real surface s that the spectral
+// operator acts on, packed as the complex number (s, 0) in the first slot) and
+// `cleanOut` (the state of this step with wrapped-in cells cleared and the
+// foam turbulence decayed and re-injected). The host swaps nothing here.
+//
+// Wake model. A moving pressure patch p on a free surface of height h
+// (linear deep water, velocity potential phi at the surface):
+//   dh/dt = Q[phi],  dphi/dt = -g h - p/rho,  Q = |k| (the Dirichlet-to-Neumann
+// operator), so   d2h/dt2 = -g Q[h + p/(rho g)].
+// With the pressure head e = p/(rho g) in metres, the surface that Q acts on is
+//   s = h + e.
+// A hull at rest depresses the water to the equilibrium h = -e; a hull in
+// motion at speed V sheds the Kelvin pattern. wake_step advances h.
+//
+// State layout (one vec4 per cell, toroidal like ocean_foam):
+//   wakeIn  = (h_t, h_{t-1}, turbulence, theta)  height now and one step ago (m),
+//                                              foam turbulence 0..1, streak angle
+//   fftOut  = (s, 0, 0, 0)
+//   cleanOut = (h_t, h_{t-1}, turbulence', theta)
+// where theta is the hull heading folded into [0, pi) at the time the water was
+// last churned (the foam kernel orients streaks with it; a streak has no
+// direction, so a half turn is the same).
+// A world cell (wx, wz) lives at buffer texel (wx mod width, wz mod width).
+// originX/originZ are the world cell index of the window's first cell AFTER
+// this frame's move and shiftX/shiftZ the whole cells the origin moved; the
+// cells that wrapped in (see ocean_foam) are cleared, so the field is
+// preserved in world terms. reset != 0 clears the whole window.
+//
+// Hull. hullU/hullV is the hull centre relative to the window's first cell
+// corner in metres (small numbers: the host subtracts in float64). heading is
+// the yaw in radians, forward = (sin heading, cos heading) in (x, z), and
+// `across` = (cos heading, -sin heading). Footprints use the compact smooth
+// ellipse  w = (1 - q)^2 for q < 1, q = (along/a)^2 + (across/b)^2:
+//   pressure patch: semi axes srcLength/2 and srcBeam/2, head
+//     e = depth * fade^2 * w, fade = saturate(speed / fullSpeed), so a hull at
+//     rest forces nothing and the wake amplitude grows with speed squared. The
+//     patch sits at the bow: its forward edge is at the hull's bow, so the
+//     Kelvin pattern and the foam start together;
+//   bow wave: a second, negative patch at the stem (see the code) that raises
+//     a mound of bowGain v^2 / 2g metres in front of the hull;
+//   foam (turbulence) from three sources, all scaled by
+//     saturate(speed / foamSpeed) and combined by sum, capped at 1:
+//       aeration 0.4 w along the whole hull footprint (hullLen, hullBeam): the
+//         bubbly water along the hull, below the foam threshold on its own;
+//       stern wash, a wide soft top: smoothstep(0, 1, 1.7 (1 - q)) on an
+//         ellipse centred at u = -0.9 (u = along / (length/2)) with semi axes
+//         0.4 (in u) and 0.6 beam: a churned band one beam wide that the hull
+//         leaves behind it, plus a faint shoulder 0.3 (1 - 0.4 q)^2 about 1.6
+//         times as wide, so the band's edge fades over several cells;
+//       bow wash bowFoam w smoothstep(4.5, 9, speed), centred at u = 0.8 with
+//         semi axes 0.35 (in u) and beam/2: white water at the stem that
+//         rolls away along both sides (faint at 8 kn, full from 18 kn).
+// Turbulence T lives in the water frame and trails the hull. Per step
+//   T' = max(T_d exp(-dt k_c / tau), injection)
+//   T_d = T + a (T_left + T_right + T_up + T_down - 4 T),  a = min(diffuse dt / cell^2, 0.2)
+//   k_c = 1 + jitter hash(world cell)
+// The diffusion widens the band slowly (diffuse is a diffusivity in m^2/s) and
+// the per-cell decay rate k_c makes the trail break into patches as it fades;
+// the hash of the world cell index is fixed in the water frame, so the patches
+// do not move with the hull. hash(x, z) = fract(sin(12.9898 x + 78.233 z)
+// 43758.5453) with x and z the world cell indices reduced mod 289.
+
+struct WakeSourceParams {
+  width: u32;
+  reset: u32;
+  _pad0: u32;
+  _pad1: u32;
+  originX: i32;
+  originZ: i32;
+  shiftX: i32;
+  shiftZ: i32;
+  cell: f32;
+  dt: f32;
+  tau: f32;
+  depth: f32;
+  hullU: f32;
+  hullV: f32;
+  heading: f32;
+  speed: f32;
+  hullLen: f32;
+  hullBeam: f32;
+  srcLength: f32;
+  srcBeam: f32;
+  fullSpeed: f32;
+  foamSpeed: f32;
+  diffuse: f32;
+  jitter: f32;
+  bowGain: f32;
+  bowFoam: f32;
+  _pad4: f32;
+  _pad5: f32;
+}
+
+@group(0) @binding(0) uniform wake: WakeSourceParams;
+@group(0) @binding(1) storage read wakeIn: []vec4;
+@group(0) @binding(2) storage read_write fftOut: []vec4;
+@group(0) @binding(3) storage read_write cleanOut: []vec4;
+
+@workgroup(64) kernel wake_source(gid: global_invocation_id) {
+  let i = gid.x;
+  let w = wake.width;
+  if i >= w * w { return; }
+  let wi = i32(w);
+  let ru = ((i32(i % w) - wake.originX) % wi + wi) % wi;
+  let rv = ((i32(i / w) - wake.originZ) % wi + wi) % wi;
+
+  var entered = wake.reset != 0u;
+  if wake.shiftX > 0 {
+    if ru >= wi - wake.shiftX { entered = true; }
+  }
+  if wake.shiftX < 0 {
+    if ru < 0 - wake.shiftX { entered = true; }
+  }
+  if wake.shiftZ > 0 {
+    if rv >= wi - wake.shiftZ { entered = true; }
+  }
+  if wake.shiftZ < 0 {
+    if rv < 0 - wake.shiftZ { entered = true; }
+  }
+  var st = wakeIn[i];
+  if entered { st = vec4(0.0, 0.0, 0.0, 0.0); }
+
+  // Cell centre relative to the hull, split along and across the heading.
+  let px = (f32(ru) + 0.5) * wake.cell - wake.hullU;
+  let pz = (f32(rv) + 0.5) * wake.cell - wake.hullV;
+  let fx = sin(wake.heading);
+  let fz = cos(wake.heading);
+  let along = px * fx + pz * fz;
+  let across = px * fz - pz * fx;
+
+  // Pressure head under the (small) patch, whose forward edge is at the bow.
+  let bowShift = max(0.5 * wake.hullLen - 0.5 * wake.srcLength, 0.0);
+  let pa = (along - bowShift) / (0.5 * wake.srcLength);
+  let pb = across / (0.5 * wake.srcBeam);
+  let qs = pa * pa + pb * pb;
+  var head = 0.0;
+  if qs < 1.0 {
+    let fade = clamp(wake.speed / wake.fullSpeed, 0.0, 1.0);
+    head = wake.depth * fade * fade * (1.0 - qs) * (1.0 - qs);
+  }
+
+  // Bow wave: a mound at the stem from a patch of negative pressure (the surface
+  // s = h + e that the operator acts on is lowered there, so the water rises to
+  // h = -e), whose head is bowGain v^2 / 2g: the stagnation head of the speed.
+  // The patch is 0.18 hull lengths long and 0.6 beam wide (at least two and one
+  // and a half cells), its forward edge at the stem. A hull at rest raises nothing.
+  let bowLen = max(0.18 * wake.hullLen, 2.0 * wake.cell);
+  let bowBeam = max(0.6 * wake.hullBeam, 1.5 * wake.cell);
+  let ba = (along - 0.5 * wake.hullLen + 0.5 * bowLen) / (0.5 * bowLen);
+  let bb = across / (0.5 * bowBeam);
+  let qbw = ba * ba + bb * bb;
+  if qbw < 1.0 {
+    head = head - wake.bowGain * wake.speed * wake.speed / 19.62 * (1.0 - qbw) * (1.0 - qbw);
+  }
+
+  // Turbulence injection: aeration along the hull, the stern wash, the bow wash.
+  let uh = along / (0.5 * wake.hullLen);
+  let vh = across / (0.5 * wake.hullBeam);
+  let qh = uh * uh + vh * vh;
+  var inj = 0.0;
+  if qh < 1.0 {
+    inj = 0.4 * (1.0 - qh) * (1.0 - qh);
+  }
+  let su = (uh + 0.9) / 0.4;
+  let sv = vh / 1.2;
+  let qw = su * su + sv * sv;
+  if qw < 1.0 {
+    inj = inj + smoothstep(0.0, 1.0, (1.0 - qw) * 1.7);
+  }
+  let qx = qw * 0.4;
+  if qx < 1.0 {
+    inj = inj + 0.3 * (1.0 - qx) * (1.0 - qx);
+  }
+  // Bow wash: white water at the stem that rolls away along both sides, an
+  // ellipse centred at u = 0.8 with semi axes 0.35 (in u) and one beam/2 across.
+  // It grows with speed from nothing at 4.5 m/s (9 kn) to full at 9 m/s (18 kn).
+  let bu = (uh - 0.8) / 0.35;
+  let bv = vh / 1.0;
+  let qb = bu * bu + bv * bv;
+  if qb < 1.0 {
+    inj = inj + wake.bowFoam * smoothstep(4.5, 9.0, wake.speed) * (1.0 - qb) * (1.0 - qb);
+  }
+  inj = min(inj * clamp(wake.speed / wake.foamSpeed, 0.0, 1.0), 1.0);
+
+  // Diffusion over the four neighbours, then decay with the cell's own rate.
+  let cx = i % w;
+  let cz = i / w;
+  let tl = wakeIn[cz * w + (cx + w - 1u) % w].z;
+  let tr = wakeIn[cz * w + (cx + 1u) % w].z;
+  let tu = wakeIn[((cz + w - 1u) % w) * w + cx].z;
+  let td = wakeIn[((cz + 1u) % w) * w + cx].z;
+  let ka = min(wake.diffuse * wake.dt / (wake.cell * wake.cell), 0.2);
+  var told = st.z;
+  if entered { told = 0.0; }
+  var tdiff = told + ka * (tl + tr + tu + td - 4.0 * told);
+  if entered { tdiff = 0.0; }
+  let wx = f32(((wake.originX + i32(ru)) % 289 + 289) % 289);
+  let wz = f32(((wake.originZ + i32(rv)) % 289 + 289) % 289);
+  let nz = fract(sin(12.9898 * wx + 78.233 * wz) * 43758.5453);
+  let decayed = max(tdiff, 0.0) * exp(0.0 - wake.dt * (1.0 + wake.jitter * nz) / wake.tau);
+  let turb = max(decayed, inj);
+  // The streak angle of the water as it was last churned.
+  var theta = st.w;
+  if inj > decayed {
+    theta = wake.heading - 3.141592653589793 * floor(wake.heading / 3.141592653589793);
+  }
+
+  fftOut[i] = vec4(st.x + head, 0.0, 0.0, 0.0);
+  cleanOut[i] = vec4(st.x, st.y, turb, theta);
+}

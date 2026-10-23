@@ -1,0 +1,125 @@
+// evolve.elio — ocean_evolve: the time-evolved spectra of one cascade, packed
+// for two inverse FFTs. One invocation per bin of an n x n grid in natural FFT
+// order (index z * n + x, signed bin indices as in ocean_spectrum). The kernel
+// is gather-compatible: it writes only outA[i] and outB[i], two RGBA32F outputs
+// (32 bytes per pixel).
+//
+// Inputs from ocean_spectrum: h0[i] = (h0(k), conj h0(-k)) and omega[i].
+//
+//   h(k, t) = h0(k) e^{-i w t} + conj h0(-k) e^{+i w t},   w = omega, t seconds
+//
+// With the inverse FFT convention e^{+i k.x} below, the h0(k) term has phase
+// k.x - w t, so it travels toward +k. ocean_spectrum puts the energy of h0(k) at
+// k along windDir, so the water travels toward windDir, the direction of
+// Scene3D's windDirection.
+//
+// h(-k, t) = conj h(k, t), so every field below is Hermitian and its inverse
+// FFT is real. omega is quantized to whole cycles per `loopPeriod` seconds (default 1000),
+// so the field repeats with that period: the host passes t mod loop and f32 time
+// never grows. Any t works in float64.
+//
+// Fields (inverse FFT convention e^{+i k.x}, so d/dx multiplies by i kx;
+// k = (kx, kz) in rad/m, kx = 2 pi ix / L; the sign of the horizontal
+// displacement moves points toward crests for a positive choppiness):
+//   Dy       = h                    height
+//   Dx       = i (kx / |k|) h       horizontal displacement (Tessendorf 2001)
+//   Dz       = i (kz / |k|) h
+//   dDy/dx   = i kx h               slope
+//   dDy/dz   = i kz h
+//   dDx/dx   = -(kx^2 / |k|) h      = d/dx of Dx
+//   dDz/dz   = -(kz^2 / |k|) h
+//   dDx/dz   = -(kx kz / |k|) h     = d/dz of Dx = d/dx of Dz
+// At k = 0 and on the Nyquist lines h = 0, so all fields are zero there (the
+// 1/|k| factor is guarded).
+//
+// Packing. Two real fields F1 and F2 with Hermitian spectra share one complex
+// transform: the spectrum F1 + i F2 inverts to f1(x) + i f2(x), the real and
+// imaginary parts being the two fields exactly. One vec4 carries two such
+// complex numbers, so one FFT call transforms one buffer:
+//   outA = ( Dy + i Dx          | Dz + i dDy/dx )
+//   outB = ( dDy/dz + i dDx/dx  | dDz/dz + i dDx/dz )
+// After the inverse FFT (unnormalized, natural order, no (-1)^(x+z) shift):
+//   outA = (Dy, Dx, Dz, dDy/dx), outB = (dDy/dz, dDx/dx, dDz/dz, dDx/dz),
+// which is the displacement texture (Dx, Dy, Dz, dDx/dz) and the slope texture
+// (dDy/dx, dDy/dz, dDx/dx, dDz/dz) after choppiness is applied by ocean_assemble.
+
+struct OceanEvolveParams {
+  n: u32;
+  _pad0: u32;
+  _pad1: u32;
+  _pad2: u32;
+  t: f32;
+  tile: f32;
+  loopPeriod: f32;
+  _pad4: f32;
+}
+
+@group(0) @binding(0) uniform ev: OceanEvolveParams;
+@group(0) @binding(1) storage read h0: []vec4;
+@group(0) @binding(2) storage read omega: []f32;
+@group(0) @binding(3) storage read_write outA: []vec4;
+@group(0) @binding(4) storage read_write outB: []vec4;
+
+@workgroup(64) kernel ocean_evolve(gid: global_invocation_id) {
+  let i = gid.x;
+  let n = ev.n;
+  if i >= n * n { return; }
+  let x = i % n;
+  let z = i / n;
+  var ix: i32 = i32(x);
+  if x >= n / 2u { ix = i32(x) - i32(n); }
+  var iz: i32 = i32(z);
+  if z >= n / 2u { iz = i32(z) - i32(n); }
+  let dk = 6.283185307179586 / ev.tile;
+  let kx = dk * f32(ix);
+  let kz = dk * f32(iz);
+  let kk = sqrt(kx * kx + kz * kz);
+  var inv = 0.0;
+  if kk > 0.0 { inv = 1.0 / kk; }
+
+  let spec = h0[i];
+  // omega[i] is omega0 times a whole number m (ocean_spectrum quantizes it), with
+  // omega0 = 2 pi / loop. The phase is 2 pi fract(m t / loop), computed so f32
+  // keeps its accuracy: split t = t1 + t2 with t1 = floor(t), so m t1 is an exact
+  // integer (m < 3100 and t1 < 1000 stay under 2^24), reduce it modulo loop
+  // exactly, then add m t2 (below 3100 s). Needs an integer-valued loop;
+  // the phase error stays near 1e-6 rad.
+  var tloop = ev.loopPeriod;
+  if tloop <= 0.0 { tloop = 1000.0; }
+  let mcycles = floor(omega[i] * tloop / 6.283185307179586 + 0.5);
+  let t1 = floor(ev.t);
+  let t2 = ev.t - t1;
+  let big = mcycles * t1;
+  var rem = big - floor(big / tloop) * tloop;
+  if rem < 0.0 { rem = rem + tloop; }
+  if rem >= tloop { rem = rem - tloop; }
+  let cyc = (rem + mcycles * t2) / tloop;
+  let phase = 6.283185307179586 * (cyc - floor(cyc));
+  let cs = cos(phase);
+  let sn = sin(phase);
+  // h = (x + i y)(cs - i sn) + (z + i w)(cs + i sn)
+  let hr = spec.x * cs + spec.y * sn + spec.z * cs - spec.w * sn;
+  let hi = spec.y * cs - spec.x * sn + spec.w * cs + spec.z * sn;
+
+  // Each field as (re, im): a real factor times h, or i times a real factor times h.
+  let ux = kx * inv;
+  let uz = kz * inv;
+  // Dy = h; Dx = i ux h; Dz = i uz h.
+  let dxr = 0.0 - ux * hi;
+  let dxi = ux * hr;
+  let dzr = 0.0 - uz * hi;
+  let dzi = uz * hr;
+  // dDy/dx = i kx h; dDy/dz = i kz h.
+  let sxr = 0.0 - kx * hi;
+  let sxi = kx * hr;
+  let szr = 0.0 - kz * hi;
+  let szi = kz * hr;
+  // dDx/dx = -(kx^2/|k|) h; dDz/dz = -(kz^2/|k|) h; dDx/dz = -(kx kz/|k|) h.
+  let axx = 0.0 - kx * kx * inv;
+  let azz = 0.0 - kz * kz * inv;
+  let axz = 0.0 - kx * kz * inv;
+
+  // F1 + i F2 = (F1.re - F2.im, F1.im + F2.re).
+  outA[i] = vec4(hr - dxi, hi + dxr, dzr - sxi, dzi + sxr);
+  outB[i] = vec4(szr - axx * hi, szi + axx * hr, azz * hr - axz * hi, azz * hi + axz * hr);
+}

@@ -20,6 +20,7 @@ package sema
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"m31labs.dev/elio/ir"
 )
@@ -73,6 +74,7 @@ func Check(m *ir.Module) []error {
 		}
 		global.define(b.Name, bindingKind(b), b.Type)
 		c.checkType("binding "+b.Name, b.Type)
+		c.checkBindingAccess(b)
 	}
 
 	for i := range m.Kernels {
@@ -108,13 +110,21 @@ const (
 	kUniform
 	kStorageRead
 	kStorageRW
-	kShared // workgroup-shared variable: mutable, but not a storage buffer (no &)
-	kConst  // module-level compile-time constant: immutable
+	kShared         // workgroup-shared variable: mutable, but not a storage buffer (no &)
+	kConst          // module-level compile-time constant: immutable
+	kStorageTexture // write-only storage texture: only textureStore may write it
+	kTexture        // sampled texture: read-only, only textureLoad and textureDimensions
 )
 
 func bindingKind(b ir.Binding) symKind {
 	if b.Space == ir.Uniform {
 		return kUniform
+	}
+	if _, ok := b.Type.(ir.StorageTexture); ok {
+		return kStorageTexture
+	}
+	if _, ok := b.Type.(ir.Texture2D); ok {
+		return kTexture
 	}
 	if b.Access == ir.ReadWrite {
 		return kStorageRW
@@ -134,6 +144,10 @@ func (k symKind) immutableHint() string {
 		return "a read-only storage buffer; bind it storage read_write to write"
 	case kConst:
 		return "a const is immutable"
+	case kStorageTexture:
+		return "a storage texture is write-only; use textureStore"
+	case kTexture:
+		return "a sampled texture is read-only; use textureLoad"
 	}
 	return "read-only"
 }
@@ -189,6 +203,27 @@ func (c *checker) checkType(where string, t ir.Type) {
 		}
 	case ir.Array:
 		c.checkType(where, t.Elem)
+	}
+}
+
+var storageTextureFormats = map[string]bool{"rgba16float": true, "rgba32float": true, "r32float": true}
+
+func (c *checker) checkBindingAccess(b ir.Binding) {
+	tex, isTex := b.Type.(ir.StorageTexture)
+	switch {
+	case isTex:
+		if b.Space != ir.Storage || b.Access != ir.Write {
+			c.errf("binding %q: storage texture needs write access (storage write)", b.Name)
+		}
+		if !storageTextureFormats[tex.Format] {
+			c.errf("binding %q: unknown storage texture format %q", b.Name, tex.Format)
+		}
+	case isSampled(b.Type):
+		if b.Space != ir.Storage || b.Access != ir.Read {
+			c.errf("binding %q: sampled texture needs read access (texture name: tex2d)", b.Name)
+		}
+	case b.Access == ir.Write:
+		c.errf("binding %q: write access needs a storage texture", b.Name)
 	}
 }
 
@@ -284,6 +319,7 @@ func (c *checker) checkExpr(s *scope, e ir.Expr) {
 			c.checkExpr(s, a)
 		}
 		c.checkCallArity(e)
+		c.checkTextureCall(s, e)
 	case ir.Index:
 		c.checkExpr(s, e.E)
 		c.checkExpr(s, e.Idx)
@@ -338,6 +374,7 @@ var builtinArity = map[string]int{
 	"clamp": 3, "mix": 3, "smoothstep": 3, "select": 3,
 	"asin": 1, "acos": 1, "atan": 1, "atan2": 2,
 	"atomicAdd": 2, "atomicSub": 2, "atomicMax": 2, "atomicMin": 2,
+	"textureStore": 3, "textureLoad": 3,
 	"atomicExchange": 2, "atomicStore": 2, "atomicLoad": 1,
 }
 
@@ -364,4 +401,59 @@ func Errors(errs []error) error {
 		out += "\n" + m
 	}
 	return fmt.Errorf("%s", out)
+}
+
+func isSampled(t ir.Type) bool { _, ok := t.(ir.Texture2D); return ok }
+
+// checkTextureCall checks the texture builtins: textureLoad reads a sampled
+// texture and textureStore writes a storage texture; textureDimensions takes
+// either, with an explicit u32 level only on a sampled texture. A texture
+// argument whose type is not known is left alone.
+func (c *checker) checkTextureCall(s *scope, e ir.Call) {
+	switch e.Func {
+	case "textureLoad":
+		if len(e.Args) != 3 {
+			return
+		}
+		if t := c.typeOf(s, e.Args[0]); t != nil && !isSampled(t) {
+			c.errf("textureLoad needs a sampled texture (texture name: tex2d), got %s", typeName(t))
+		}
+		c.checkLevel(s, e.Func, e.Args[2])
+	case "textureStore":
+		if len(e.Args) != 3 {
+			return
+		}
+		if t := c.typeOf(s, e.Args[0]); t != nil {
+			if _, ok := t.(ir.StorageTexture); !ok {
+				c.errf("textureStore needs a storage texture (storage write name: tex2d_<format>), got %s", typeName(t))
+			}
+		}
+	case "textureDimensions":
+		if len(e.Args) < 1 || len(e.Args) > 2 {
+			c.errf("textureDimensions expects 1 or 2 argument(s), got %d", len(e.Args))
+			return
+		}
+		if len(e.Args) == 2 {
+			if t := c.typeOf(s, e.Args[0]); t != nil && !isSampled(t) {
+				c.errf("textureDimensions with a level needs a sampled texture, got %s", typeName(t))
+			}
+			c.checkLevel(s, e.Func, e.Args[1])
+		}
+	}
+}
+
+// checkLevel requires a texture level argument to be a u32 where that is
+// decidable: a literal must carry the u suffix, a typed name must be u32.
+// Arithmetic and calls whose type sema does not infer are accepted.
+func (c *checker) checkLevel(s *scope, fn string, level ir.Expr) {
+	switch l := level.(type) {
+	case ir.Lit:
+		if !strings.HasSuffix(l.Text, "u") {
+			c.errf("%s: level must be u32, got literal %s", fn, l.Text)
+		}
+		return
+	}
+	if t := c.typeOf(s, level); t != nil && t != ir.Type(ir.U32) {
+		c.errf("%s: level must be u32, got %s", fn, typeName(t))
+	}
 }

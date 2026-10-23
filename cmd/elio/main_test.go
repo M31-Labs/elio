@@ -189,3 +189,59 @@ func TestDoctorReportsTools(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitTSOceanSet(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"emit", "ts", "--set", "ocean"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	for _, want := range []string{"export const oceanMipWGSL", "export const oceanMipGLSL", "export const fftGather256GLSL", "// sha256: "} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	if code := run([]string{"emit", "ts", "--set", "nope"}, io.Discard, io.Discard); code != 2 {
+		t.Errorf("unknown set: want exit 2, got %d", code)
+	}
+	if code := run([]string{"emit", "ts"}, io.Discard, io.Discard); code != 2 {
+		t.Errorf("missing --set: want exit 2, got %d", code)
+	}
+}
+
+func TestEmitTSOceanGlobal(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"emit", "ts", "--set", "ocean", "--global", "__gosx_scene3d_elio_ocean"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"window.__gosx_scene3d_elio_ocean = deepFreeze({", "oceanMip: {", "fftGather256: {", "// sha256: "} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	if strings.Contains(got, "export ") {
+		t.Error("global form must not use ES exports")
+	}
+	if code := run([]string{"emit", "ts", "--set", "ocean", "--global", "a b"}, io.Discard, io.Discard); code != 1 {
+		t.Errorf("bad global name: want exit 1, got %d", code)
+	}
+}
+
+func TestEmitTSBackendFlag(t *testing.T) {
+	emit := func(args ...string) (int, string) {
+		var out bytes.Buffer
+		code := run(append([]string{"emit", "ts", "--set", "ocean"}, args...), &out, io.Discard)
+		return code, out.String()
+	}
+	code, gpu := emit("--global", "G", "--backend", "webgpu")
+	if code != 0 || !strings.Contains(gpu, "oceanEvolve") || strings.Contains(gpu, "gatherLayout") || strings.Contains(gpu, `"webgl2/`) || !strings.Contains(gpu, `"webgpu/high"`) {
+		t.Errorf("webgpu: code %d, wrong content", code)
+	}
+	code, gl := emit("--backend", "webgl2", "--global", "G")
+	if code != 0 || strings.Contains(gl, "WGSL") || strings.Contains(gl, "fftCompute") || !strings.Contains(gl, "gatherLayout") || !strings.Contains(gl, `"webgl2/low"`) {
+		t.Errorf("webgl2: code %d, wrong content", code)
+	}
+	if code, _ := emit("--backend", "vulkan"); code != 1 {
+		t.Errorf("unknown backend: want exit 1, got %d", code)
+	}
+}

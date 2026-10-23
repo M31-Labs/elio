@@ -1,0 +1,94 @@
+// wake_step.elio — wake_step: advance the wake height one step and write the
+// surface texture. One invocation per texel of a width x width toroidal window.
+// Gather-compatible: it writes the new state `stateOut` (a vec4, 16 bytes) and
+// one RGBA16F texture (8 bytes), 24 bytes per pixel.
+//
+// Time stepping. The free surface obeys (see wake_source)
+//   d2h/dt2 + alpha dh/dt = -g Q[s],   s = h + pressure head,   Q = |k|,
+// so omega^2 = g |k|: deep-water dispersion. Q[s] arrives in qIn (x lane),
+// computed by inverse FFT, wake_symbol and inverse FFT. Central differences in
+// time with velocity damping give the leapfrog step
+//   h' = h + beta (h - h_prev) - dt^2 g Q[s],   beta = max(1 - alpha_cell dt, 0)
+// where alpha_cell = alpha + spongeRate t^2 and t is 0 inside the window and
+// rises to 1 at the window edge over `sponge` cells:
+//   t = saturate((sponge - edge) / sponge),  edge = distance in cells from the
+//   cell to the nearest window edge (0 on the edge row).
+// The sponge absorbs outgoing waves so the toroidal wrap does not echo them
+// back. Stability (leapfrog): dt omega_max < 2 with omega_max^2 = g |k|_max,
+// |k|_max = 2 pi sqrt(2) (n/2 - 1) / length for the grid (Nyquist lines are
+// zeroed); the graph keeps dt omega_max below 1.7.
+//
+// Inputs. qIn = (Q[s], 0, 0, 0) per cell, in 1/m times metres: Q has the unit
+// of 1/length, so g Q has m/s^2 per metre of s. cleanIn is wake_source's cleaned
+// state (h, h_prev, turbulence, streak angle). Output state = (h', h, turbulence, streak angle).
+// The texture holds (h', dh'/dx, dh'/dz, turbulence) at the cell, with the
+// gradients by central differences of h' over +-1 cell (m per m). They need h'
+// at the four neighbours, which the kernel recomputes from qIn and cleanIn (the
+// toroidal wrap supplies the neighbours at the window edge). Sample the
+// texture with the world cell modulo width and wrap addressing.
+//
+// originX/originZ are the world cell index of the window's first cell, as in
+// ocean_foam, and only place the sponge.
+
+struct WakeStepParams {
+  width: u32;
+  _pad0: u32;
+  _pad1: u32;
+  _pad2: u32;
+  originX: i32;
+  originZ: i32;
+  sponge: f32;
+  spongeRate: f32;
+  dt: f32;
+  gravity: f32;
+  alpha: f32;
+  cell: f32;
+}
+
+@group(0) @binding(0) uniform wstep: WakeStepParams;
+@group(0) @binding(1) storage read qIn: []vec4;
+@group(0) @binding(2) storage read cleanIn: []vec4;
+@group(0) @binding(3) storage read_write stateOut: []vec4;
+@group(0) @binding(4) storage write wakeTex: tex2d_rgba16float;
+
+@workgroup(64) kernel wake_step(gid: global_invocation_id) {
+  let i = gid.x;
+  let w = wstep.width;
+  if i >= w * w { return; }
+  let wi = i32(w);
+  let cx = i32(i % w);
+  let cz = i32(i / w);
+
+  // New height at the cell (c = 0) and its +x, -x, +z, -z neighbours (c = 1..4).
+  var h0 = 0.0;
+  var h1 = 0.0;
+  var h2 = 0.0;
+  var h3 = 0.0;
+  var h4 = 0.0;
+  for (var c: u32 = 0u; c < 5u; c = c + 1u) {
+    var ox: i32 = 0;
+    var oz: i32 = 0;
+    if c == 1u { ox = 1; }
+    if c == 2u { ox = 0 - 1; }
+    if c == 3u { oz = 1; }
+    if c == 4u { oz = 0 - 1; }
+    let xi = (cx + ox + wi) % wi;
+    let zi = (cz + oz + wi) % wi;
+    let j = u32(zi * wi + xi);
+    let ru = ((xi - wstep.originX) % wi + wi) % wi;
+    let rv = ((zi - wstep.originZ) % wi + wi) % wi;
+    let edge = min(min(ru, rv), min(wi - 1 - ru, wi - 1 - rv));
+    let t = clamp((wstep.sponge - f32(edge)) / max(wstep.sponge, 0.001), 0.0, 1.0);
+    let beta = max(1.0 - (wstep.alpha + wstep.spongeRate * t * t) * wstep.dt, 0.0);
+    let s = cleanIn[j];
+    let hn = s.x + beta * (s.x - s.y) - wstep.dt * wstep.dt * wstep.gravity * qIn[j].x;
+    if c == 0u { h0 = hn; }
+    if c == 1u { h1 = hn; }
+    if c == 2u { h2 = hn; }
+    if c == 3u { h3 = hn; }
+    if c == 4u { h4 = hn; }
+  }
+  let own = cleanIn[i];
+  stateOut[i] = vec4(h0, own.x, own.z, own.w);
+  textureStore(wakeTex, vec2u(i % w, i / w), vec4(h0, (h1 - h2) / (2.0 * wstep.cell), (h3 - h4) / (2.0 * wstep.cell), own.z));
+}
