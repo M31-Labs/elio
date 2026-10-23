@@ -29,7 +29,17 @@
 // formed from sums over cascades (a per-cascade Jacobian cannot be combined):
 //   J = (1 + lambda S_xx)(1 + lambda S_zz) - (lambda S_xz)^2
 //   S_xx, S_zz, S_xz = sums over cascades of dDx/dx, dDz/dz, dDx/dz
-// The texture holds (f, J, 0, 1).
+// The texture holds (f, J, wake, 1); wake is the wake foam level, 0 without one.
+//
+// Ship wake. With wakeWidth > 0 and wakeGain > 0 the foam also follows the wake
+// window's turbulence T (the z lane of wakeIn, a wakeWidth^2 vec4 buffer in the
+// toroidal layout of wake_source): f = max(f, saturate(wakeGain T)), where T is
+// bilinear at the foam cell centre in wake cells (cell size wakeCell metres) and
+// 0 outside the wake window. The wake window's turbulence persists for its own
+// time constant, so the trail outlives the crest foam's tau. Positions use
+// small numbers only: wakeRelX/Z is the foam window origin in metres from the
+// wake window's origin corner (evaluated in float64 by the host), and
+// wakeOriginX/Z the wake window origin cell wrapped to [0, wakeWidth).
 //
 // Host layout of the cascade inputs. fieldB0..fieldB3 are the cascades' B buffers
 // as the inverse FFT leaves them: n_c * n_c vec4, natural order (index z * n + x,
@@ -74,6 +84,14 @@ struct OceanFoamParams {
   omZ1: f32;
   omZ2: f32;
   omZ3: f32;
+  wakeWidth: u32;
+  wakeGain: f32;
+  wakeCell: f32;
+  _pad4: f32;
+  wakeRelX: f32;
+  wakeRelZ: f32;
+  wakeOriginX: i32;
+  wakeOriginZ: i32;
 }
 
 @group(0) @binding(0) uniform foam: OceanFoamParams;
@@ -84,6 +102,7 @@ struct OceanFoamParams {
 @group(0) @binding(5) storage read fieldB3: []vec4;
 @group(0) @binding(6) storage read_write foamOut: []f32;
 @group(0) @binding(7) storage write foamTex: tex2d_rgba16float;
+@group(0) @binding(8) storage read wakeIn: []vec4;
 
 @workgroup(64) kernel ocean_foam(gid: global_invocation_id) {
   let i = gid.x;
@@ -189,6 +208,42 @@ struct OceanFoamParams {
   var f = foamIn[i] * exp(0.0 - foam.dt / foam.tau);
   if entered { f = 0.0; }
   f = min(f + clamp((foam.threshold - jac) * foam.gain, 0.0, 1.0), 1.0);
+
+  // Ship wake: foam follows the wake's turbulence (the z lane of wakeIn).
+  var wf = 0.0;
+  if foam.wakeWidth > 0u {
+    if foam.wakeGain > 0.0 {
+      let ww = i32(foam.wakeWidth);
+      let px = (foam.wakeRelX + (f32(ru) + 0.5) * foam.cell) / foam.wakeCell - 0.5;
+      let pz = (foam.wakeRelZ + (f32(rv) + 0.5) * foam.cell) / foam.wakeCell - 0.5;
+      let x0 = floor(px);
+      let z0 = floor(pz);
+      let fx = px - x0;
+      let fz = pz - z0;
+      var turb = 0.0;
+      for (var c: u32 = 0u; c < 4u; c = c + 1u) {
+        var cu = i32(x0);
+        var cv = i32(z0);
+        var wgt = (1.0 - fx) * (1.0 - fz);
+        if c == 1u { cu = cu + 1; wgt = fx * (1.0 - fz); }
+        if c == 2u { cv = cv + 1; wgt = (1.0 - fx) * fz; }
+        if c == 3u { cu = cu + 1; cv = cv + 1; wgt = fx * fz; }
+        if cu >= 0 {
+          if cu < ww {
+            if cv >= 0 {
+              if cv < ww {
+                let bu = (cu + foam.wakeOriginX) % ww;
+                let bv = (cv + foam.wakeOriginZ) % ww;
+                turb = turb + wgt * wakeIn[u32(bv * ww + bu)].z;
+              }
+            }
+          }
+        }
+      }
+      wf = clamp(foam.wakeGain * turb, 0.0, 1.0);
+      f = max(f, wf);
+    }
+  }
   foamOut[i] = f;
-  textureStore(foamTex, vec2u(i % w, i / w), vec4(f, jac, 0.0, 1.0));
+  textureStore(foamTex, vec2u(i % w, i / w), vec4(f, jac, wf, 1.0));
 }

@@ -206,6 +206,18 @@ time), `ocean_assemble` (choppiness, displacement and slope textures),
 `ocean_probe` (height and normal at up to 64 world points). Each source file
 under `stdlib/ocean/` documents its model, units and buffer layout.
 
+**Ship wake.** Three more gather kernels, `wake_source`, `wake_symbol` and
+`wake_step`, simulate a ship's wake in a 256 x 256 toroidal window of the water
+frame. The surface obeys d²h/dt² = -g Q[h + p/(ρg)] with Q = |k| applied exactly
+by the existing inverse FFT (so deep-water dispersion holds up to the grid's
+Nyquist limit, and a moving pressure patch sheds a Kelvin wedge of half-angle
+19.47°). `ocean_foam` can follow the wake's turbulence for the white trail. The
+ocean graphs run the wake when the bool param `wakeEnabled` is set; the hull's
+pose is the params `hullX`, `hullZ`, `hullHeading` and `hullSpeed`, either set by
+the app or read from a scene node (`graph.SourceNode`). The surface binds the
+`wake` export (height, slope and turbulence). Each source file under
+`stdlib/ocean/` documents its units.
+
 **Float32 mode.** `run.RunWith(..., run.Options{Float32: true})` rounds every
 float result to float32, so the interpreter matches a GPU's `f32` arithmetic up
 to the accuracy of its math functions. The default stays float64.

@@ -39,6 +39,36 @@ const (
 	tweenSeconds = 20   // presentation seconds a spectrum change takes (R10)
 )
 
+// The ship wake's fixed conventions. The window is wakeN x wakeN cells (the
+// largest size the FFT kernels cover) of wakeCell metres, 4 by default: a 1,024 m
+// window. The sponge band is wakeSponge cells wide with a peak damping rate of
+// wakeSpongeRate per second. A hull is at full pressure from wakeFullSpeed m/s
+// and at full foam from wakeFoamSpeed m/s. The window centre sits wakeBias of the
+// window width behind the hull along its heading, so the trail gets 70% of the
+// width.
+//
+// Step and stability. The leapfrog is stable for dt omega_max < 2 with
+// omega_max^2 = g |k|_max and |k|_max cell = 2 pi sqrt(2) (wakeN/2 - 1) / wakeN
+// (the Nyquist lines are zeroed). The graph caps the step at wakeDtCap seconds and
+// the effective gravity at wakeGMaxPerCell x cell, which keeps dt omega_max at or
+// below wakeStability (1.7) for any cell size. One step per frame is enough:
+// at 60 Hz that allows a time scale of 12; above it the wake runs slow
+// (a repeat of the pass sequence would restore it at the cost of a second
+// set of 36 passes on webgl2).
+const (
+	wakeN           = 256
+	wakeCellDefault = 4.0
+	wakeSponge      = 24.0
+	wakeSpongeRate  = 0.8
+	wakeFullSpeed   = 3.0
+	wakeFoamSpeed   = 5.0
+	wakeBias        = 0.2
+	wakeDtCap       = 0.2
+	wakeStability   = 1.7
+	wakeKMaxCell    = 2 * math.Pi * math.Sqrt2 * (wakeN/2 - 1) / wakeN
+	wakeGMaxPerCell = wakeStability * wakeStability / (wakeDtCap * wakeDtCap * wakeKMaxCell)
+)
+
 // oceanCascade is one cascade: tile size in metres and band [kMin, kMax) in rad/m.
 type oceanCascade struct{ size, kMin, kMax float64 }
 
@@ -81,11 +111,18 @@ func OceanGraphs() (map[string]graph.Graph, error) {
 }
 
 func oceanGraphs(set ts.KernelSet) (map[string]graph.Graph, error) {
+	return OceanGraphsForHull(set, "")
+}
+
+// OceanGraphsForHull is OceanGraphs with the hull pose (hullX, hullZ,
+// hullHeading, hullSpeed) read by the runner from the scene node hullNode
+// instead of set from the app; an empty hullNode keeps them plain value params.
+func OceanGraphsForHull(set ts.KernelSet, hullNode string) (map[string]graph.Graph, error) {
 	ks := set.GraphKernels()
 	out := map[string]graph.Graph{}
 	for _, backend := range []string{graph.WebGPU, graph.WebGL2} {
 		for _, tier := range oceanTiers {
-			g, err := buildOcean(backend, tier.name, tier.n, tier.cascades, ks)
+			g, err := buildOcean(backend, tier.name, tier.n, tier.cascades, ks, hullNode)
 			if err != nil {
 				return nil, err
 			}
@@ -95,7 +132,7 @@ func oceanGraphs(set ts.KernelSet) (map[string]graph.Graph, error) {
 	return out, nil
 }
 
-func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph.Graph, error) {
+func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNode string) (graph.Graph, error) {
 	b := graph.NewBuilder("ocean", backend, tier, ks)
 	gpu := backend == graph.WebGPU
 	ref := graph.Ref
@@ -157,6 +194,76 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		}
 	}
 
+	// Ship wake: the hull's pose and the wake window's derived origin, in the
+	// water frame (see the wake section of OceanGraphs).
+	if hullNode == "" {
+		b.Value("hullX", graph.F32, 0).Value("hullZ", graph.F32, 0).Value("hullHeading", graph.F32, 0).Value("hullSpeed", graph.F32, 0)
+	} else {
+		b.Node("hullX", hullNode, "x").Node("hullZ", hullNode, "z").Node("hullHeading", hullNode, "heading").Node("hullSpeed", hullNode, "speed")
+	}
+	b.BoolValue("wakeEnabled", false)
+	b.Value("hullLength", graph.F32, 200).Value("hullBeam", graph.F32, 30)
+	b.Value("wakeCell", graph.F32, wakeCellDefault).Value("wakeDepth", graph.F32, 0.4).Value("wakeGravity", graph.F32, 9.81)
+	b.Value("wakeAlpha", graph.F32, 0.02).Value("wakeMinLambdaCells", graph.F32, 8)
+	b.Value("wakeFoamGain", graph.F32, 1).Value("wakeFoamTau", graph.F32, 45)
+	b.Expr("wakeOn", graph.F32, "mul", ref("wakeEnabled"), 1.0)
+	b.Expr("wakeFoamGainEff", graph.F32, "mul", ref("wakeEnabled"), ref("wakeFoamGain"))
+	b.Delta("wakeEdge", graph.I32, "wakeEnabled")
+	b.Expr("wakeReset", graph.U32, "max", ref("wakeEdge"), 0.0)
+	b.Expr("wakeLength", graph.F32, "mul", ref("wakeCell"), wakeN)
+	b.Expr("hullSin", graph.F32, "sin", ref("hullHeading"))
+	b.Expr("hullCos", graph.F32, "cos", ref("hullHeading"))
+	b.Expr("wakeBias", graph.F32, "mul", ref("wakeCell"), wakeBias*wakeN)
+	b.Expr("wakeHalf", graph.F32, "mul", ref("wakeCell"), wakeN/2)
+	for _, ax := range []struct{ name, dir string }{{"X", "hullSin"}, {"Z", "hullCos"}} {
+		a := ax.name
+		b.Expr("hullWater"+a, graph.F32, "sub", ref("hull"+a), ref("water"+a))
+		b.Expr("wakeBias"+a, graph.F32, "mul", ref(ax.dir), ref("wakeBias"))
+		b.Expr("wakeCenter"+a, graph.F32, "sub", ref("hullWater"+a), ref("wakeBias"+a))
+		b.Expr("wakeCorner"+a, graph.F32, "sub", ref("wakeCenter"+a), ref("wakeHalf"))
+		b.Expr("wakeTexel"+a, graph.F32, "div", ref("wakeCorner"+a), ref("wakeCell"))
+		b.Expr("wakeOrigin"+a, graph.I32, "floor", ref("wakeTexel"+a))
+		b.Delta("wakeShift"+a, graph.I32, "wakeOrigin"+a)
+		b.Expr("wakeOriginM"+a, graph.F32, "mul", ref("wakeOrigin"+a), ref("wakeCell"))
+		b.Expr("wakeHull"+map[string]string{"X": "U", "Z": "V"}[a], graph.F32, "sub", ref("hullWater"+a), ref("wakeOriginM"+a))
+		b.Expr("wakeOriginMod"+a, graph.I32, "mod", ref("wakeOrigin"+a), wakeN)
+		b.Expr("wakeRel"+a, graph.F32, "sub", ref("foamOriginMeters"+a), ref("wakeOriginM"+a))
+		b.Expr("wakeWorldOrigin"+a, graph.F32, "add", ref("water"+a), ref("wakeOriginM"+a))
+		b.Expr("wakeCamRel"+a, graph.F32, "sub", ref("wakeWorldOrigin"+a), ref("camera"+a))
+	}
+	// Gravity and step. The transverse wavelength is 2 pi V^2 / g_eff, which is
+	// unresolved on the grid at low speed. So g_eff = min(g, 2 pi V^2 / (wakeMinLambdaCells
+	// cell)), at least 0.05: the wavelength is the real one when it is at least
+	// wakeMinLambdaCells cells (V above 7.1 m/s, 14 knots, at 4 m cells) and is
+	// held at wakeMinLambdaCells cells below that, so a slow hull still shows a
+	// Kelvin wedge, with longer waves than the real ones. g_eff is also capped by
+	// the stability limit. The step is the frame time (scaled) up to wakeDtCap.
+	b.Expr("hullSpeedSq", graph.F32, "mul", ref("hullSpeed"), ref("hullSpeed"))
+	b.Expr("wakeLamM", graph.F32, "mul", ref("wakeMinLambdaCells"), ref("wakeCell"))
+	b.Expr("wakeGScale", graph.F32, "div", 2*math.Pi, ref("wakeLamM"))
+	b.Expr("wakeGFloor", graph.F32, "mul", ref("hullSpeedSq"), ref("wakeGScale"))
+	b.Expr("wakeGWanted", graph.F32, "min", ref("wakeGravity"), ref("wakeGFloor"))
+	b.Expr("wakeGMax", graph.F32, "mul", ref("wakeCell"), wakeGMaxPerCell)
+	b.Expr("wakeGCapped", graph.F32, "min", ref("wakeGWanted"), ref("wakeGMax"))
+	b.Expr("wakeGEff", graph.F32, "max", ref("wakeGCapped"), 0.05)
+	b.Expr("wakeStep", graph.F32, "mul", ref("dt"), ref("timeScale"))
+	b.Expr("wakeDt", graph.F32, "min", ref("wakeStep"), wakeDtCap)
+	// The pressure patch is half a transverse wavelength long (at least two
+	// cells) and no longer than the hull; its beam is 0.67 of its length, at
+	// least 1.5 cells and no wider than the hull.
+	b.Expr("wakeHalfLamNum", graph.F32, "mul", ref("hullSpeedSq"), math.Pi)
+	b.Expr("wakeHalfLam", graph.F32, "div", ref("wakeHalfLamNum"), ref("wakeGEff"))
+	b.Expr("wakeSrcLen0", graph.F32, "min", ref("hullLength"), ref("wakeHalfLam"))
+	b.Expr("wakeMinSrc", graph.F32, "mul", ref("wakeCell"), 2.0)
+	b.Expr("wakeSrcLength", graph.F32, "max", ref("wakeSrcLen0"), ref("wakeMinSrc"))
+	b.Expr("wakeBeam0", graph.F32, "mul", ref("wakeSrcLength"), 0.67)
+	b.Expr("wakeBeam1", graph.F32, "min", ref("hullBeam"), ref("wakeBeam0"))
+	b.Expr("wakeMinBeam", graph.F32, "mul", ref("wakeCell"), 1.5)
+	b.Expr("wakeSrcBeam", graph.F32, "max", ref("wakeBeam1"), ref("wakeMinBeam"))
+	// The surface samples the wake texture at ((xz - camera - wakeCamRel) / wakeCell
+	// + wakeOriginMod) / 256 with wrap addressing, inside the window only.
+	b.ExportParams("wakeCamRelX", "wakeCamRelZ", "wakeOriginModX", "wakeOriginModZ", "wakeCell", "wakeOn")
+
 	size := func(c int) int {
 		if c == 0 {
 			return 64
@@ -175,16 +282,16 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		return p
 	}
 	// Mips: WebGPU downsamples level by level; WebGL2 calls generateMipmap.
-	mipChain := func(pre, tex string, w, mips int) {
+	mipChain := func(pre, tex string, w, mips int, when string) {
 		if !gpu {
-			b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "mipmap", Resource: tex})
+			b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "mipmap", Resource: tex, When: when})
 			return
 		}
 		// One repeat over the levels: level l+1 is written from level l. The
 		// dispatch is sized for level 1; smaller levels leave the extra
 		// workgroups idle (the kernel returns past its destination size).
 		half := max(w>>1, 1)
-		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", Body: []graph.Pass{
+		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", When: when, Body: []graph.Pass{
 			{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip",
 				Dispatch: b.Workgroups("ocean_mip", "ocean_mip", half*half),
 				Bindings: []graph.Binding{
@@ -262,10 +369,68 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 			Uniforms: []graph.Uniform{b.Uniform("ocean_assemble", "assem", map[string]any{"n": nc, "lambda": ref("lambda")})}}
 		b.Pass(place(as, "ocean_assemble", nc, nc))
 		for _, tex := range []string{name("dispTex", c), name("slopeTex", c)} {
-			mipChain(pre, tex, nc, mips)
+			mipChain(pre, tex, nc, mips, "")
 		}
 		b.Export(name("disp", c), name("dispTex", c)).Export(name("slope", c), name("slopeTex", c))
 	}
+
+	// Ship wake (when wakeEnabled): a spectral free surface in a 256 x 256
+	// toroidal window of the water frame. Per frame: wake_source (clear wrapped-in
+	// cells, hull pressure, foam turbulence) -> inverse FFT -> wake_symbol (|k|)
+	// -> inverse FFT -> wake_step (leapfrog, sponge, texture). The FFT buffers
+	// wakeF and wakeG are each other's scratch on webgl2, so two buffers serve
+	// both transforms; the operator output ends in wakeG on both backends.
+	wakeWhen := "param:wakeEnabled"
+	wakeCount := wakeN * wakeN
+	for _, n := range []string{"wakeA", "wakeB", "wakeF", "wakeG", "wakeC"} {
+		buf(n, "vec4<f32>", wakeCount, wakeN)
+	}
+	wakeMips := graph.MipCount(wakeN, wakeN)
+	b.Texture("wakeTex", "rgba16float", wakeN, wakeN, wakeMips)
+	wp := func(p graph.Pass, kernel string) graph.Pass {
+		p.When = wakeWhen
+		return place(p, kernel, wakeN, wakeN)
+	}
+	b.Pass(wp(graph.Pass{Name: "wake.source", Type: "kernel", Kernel: "wake_source", Entry: "wake_source",
+		Bindings: []graph.Binding{{Name: "wakeIn", Resource: "wakeA"}, {Name: "fftOut", Resource: "wakeF"}, {Name: "cleanOut", Resource: "wakeC"}},
+		Uniforms: []graph.Uniform{b.Uniform("wake_source", "wake", map[string]any{
+			"width": wakeN, "reset": ref("wakeReset"),
+			"originX": ref("wakeOriginX"), "originZ": ref("wakeOriginZ"), "shiftX": ref("wakeShiftX"), "shiftZ": ref("wakeShiftZ"),
+			"cell": ref("wakeCell"), "dt": ref("wakeDt"), "tau": ref("wakeFoamTau"), "depth": ref("wakeDepth"),
+			"hullU": ref("wakeHullU"), "hullV": ref("wakeHullV"), "heading": ref("hullHeading"), "speed": ref("hullSpeed"),
+			"hullLen": ref("hullLength"), "hullBeam": ref("hullBeam"), "srcLength": ref("wakeSrcLength"), "srcBeam": ref("wakeSrcBeam"),
+			"fullSpeed": wakeFullSpeed, "foamSpeed": wakeFoamSpeed})}}, "wake_source"))
+	wfk, wgk := fmt.Sprintf("fft_compute_%d", wakeN), fmt.Sprintf("fft_gather_%d", wakeN)
+	wakeFFT := func(label, src, dst string) {
+		if gpu {
+			for _, entry := range []string{"fft_rows", "fft_cols"} {
+				b.Pass(graph.Pass{Name: "wake." + label + "." + entry, Type: "kernel", Kernel: wfk, Entry: entry, When: wakeWhen,
+					Dispatch: &[3]int{wakeN, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: src}}})
+			}
+			return
+		}
+		for axis, ax := range []string{"rows", "cols"} {
+			body := []graph.Pass{place(graph.Pass{Name: "stage", Type: "kernel", Kernel: wgk, Entry: "fft_stage",
+				Bindings: []graph.Binding{{Name: "src", Resource: src}, {Name: "dst", Resource: dst}},
+				Uniforms: []graph.Uniform{b.Uniform(wgk, "fft", map[string]any{"n": wakeN, "stage": ref("s"), "axis": axis})}}, wgk, wakeN, wakeN)}
+			b.Pass(graph.Pass{Name: "wake." + label + "." + ax, Type: "repeat", Count: bitsLen(wakeN), Index: "s", When: wakeWhen,
+				Swap: [][2]string{{src, dst}}, Body: body})
+		}
+	}
+	wakeFFT("fft1", "wakeF", "wakeG")
+	b.Pass(wp(graph.Pass{Name: "wake.symbol", Type: "kernel", Kernel: "wake_symbol", Entry: "wake_symbol",
+		Bindings: []graph.Binding{{Name: "fftIn", Resource: "wakeF"}, {Name: "fftOut", Resource: "wakeG"}},
+		Uniforms: []graph.Uniform{b.Uniform("wake_symbol", "sym", map[string]any{"n": wakeN, "window": ref("wakeLength")})}}, "wake_symbol"))
+	wakeFFT("fft2", "wakeG", "wakeF")
+	b.Pass(wp(graph.Pass{Name: "wake.step", Type: "kernel", Kernel: "wake_step", Entry: "wake_step",
+		Bindings: []graph.Binding{{Name: "qIn", Resource: "wakeG"}, {Name: "cleanIn", Resource: "wakeC"},
+			{Name: "stateOut", Resource: "wakeB"}, {Name: "wakeTex", Resource: "wakeTex"}},
+		Uniforms: []graph.Uniform{b.Uniform("wake_step", "wstep", map[string]any{
+			"width": wakeN, "originX": ref("wakeOriginX"), "originZ": ref("wakeOriginZ"),
+			"sponge": wakeSponge, "spongeRate": wakeSpongeRate,
+			"dt": ref("wakeDt"), "gravity": ref("wakeGEff"), "alpha": ref("wakeAlpha"), "cell": ref("wakeCell")})}}, "wake_step"))
+	mipChain("wake.", "wakeTex", wakeN, wakeMips, wakeWhen)
+	b.Swap("wakeA", "wakeB").Export("wake", "wakeTex")
 
 	// Foam: a toroidal state pair, swapped after each frame, and its texture.
 	foamArea := foamWidth * foamWidth
@@ -284,6 +449,10 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		fu[fmt.Sprintf("omX%d", i)] = ref(fmt.Sprintf("foamOriginMod%dX", c))
 		fu[fmt.Sprintf("omZ%d", i)] = ref(fmt.Sprintf("foamOriginMod%dZ", c))
 	}
+	// Foam follows the wake's turbulence (zero gain unless wakeEnabled).
+	fu["wakeWidth"], fu["wakeGain"], fu["wakeCell"] = wakeN, ref("wakeFoamGainEff"), ref("wakeCell")
+	fu["wakeRelX"], fu["wakeRelZ"] = ref("wakeRelX"), ref("wakeRelZ")
+	fu["wakeOriginX"], fu["wakeOriginZ"] = ref("wakeOriginModX"), ref("wakeOriginModZ")
 	foamBind := []graph.Binding{{Name: "foamIn", Resource: "foamA"}}
 	probeBind := []graph.Binding{}
 	for i := 0; i < 4; i++ {
@@ -293,10 +462,10 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel) (graph
 		foamBind = append(foamBind, graph.Binding{Name: fmt.Sprintf("fieldB%d", i), Resource: name("fftB_", c)})
 		probeBind = append(probeBind, graph.Binding{Name: fmt.Sprintf("disp%d", i), Resource: name("fftA_", c)})
 	}
-	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"})
+	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"}, graph.Binding{Name: "wakeIn", Resource: "wakeB"})
 	b.Pass(place(graph.Pass{Name: "foam", Type: "kernel", Kernel: "ocean_foam", Entry: "ocean_foam",
 		Bindings: foamBind, Uniforms: []graph.Uniform{b.Uniform("ocean_foam", "foam", fu)}}, "ocean_foam", foamWidth, foamWidth))
-	mipChain("", "foamTex", foamWidth, foamMips)
+	mipChain("", "foamTex", foamWidth, foamMips, "")
 	b.Swap("foamA", "foamB").Export("foam", "foamTex")
 
 	// Probe (WebGPU only): sample the surface at the app's points for readback.

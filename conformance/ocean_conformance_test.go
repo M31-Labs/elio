@@ -33,6 +33,9 @@ func oceanKernels() []oceanKernel {
 		{"ocean_evolve", stdlib.OceanEvolve, []string{"kernel void ocean_evolve", "constant OceanEvolveParams&"}},
 		{"ocean_probe", stdlib.OceanProbe, []string{"kernel void ocean_probe", "constant OceanProbeParams&", "const device float4* disp0"}},
 		{"ocean_spectrum", stdlib.OceanSpectrum, []string{"kernel void ocean_spectrum", "constant OceanSpectrumParams&"}},
+		{"wake_source", stdlib.WakeSource, []string{"kernel void wake_source", "constant WakeSourceParams&"}},
+		{"wake_symbol", stdlib.WakeSymbol, []string{"kernel void wake_symbol", "constant WakeSymbolParams&"}},
+		{"wake_step", stdlib.WakeStep, []string{"kernel void wake_step", "constant WakeStepParams&", "access::write"}},
 	}
 }
 
@@ -91,7 +94,10 @@ func TestOceanGatherKernels(t *testing.T) {
 		{"ocean_evolve", stdlib.OceanEvolve, "ocean_evolve", 2, 2},
 		{"ocean_assemble", stdlib.OceanAssemble, "ocean_assemble", 2, 2},
 		{"ocean_mip", stdlib.OceanMip, "ocean_mip", 1, 1},
-		{"ocean_foam", stdlib.OceanFoam, "ocean_foam", 5, 2},
+		{"ocean_foam", stdlib.OceanFoam, "ocean_foam", 6, 2},
+		{"wake_source", stdlib.WakeSource, "wake_source", 1, 2},
+		{"wake_symbol", stdlib.WakeSymbol, "wake_symbol", 1, 1},
+		{"wake_step", stdlib.WakeStep, "wake_step", 2, 2},
 	}
 	for _, n := range []int{64, 256} {
 		n := n

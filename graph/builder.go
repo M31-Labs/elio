@@ -60,6 +60,17 @@ func (b *Builder) Value(name, typ string, def float64) *Builder {
 	return b
 }
 
+// BoolValue declares a bool param the app sets, for pass conditions
+// ("param:<name>"); expressions read it as 1 or 0.
+func (b *Builder) BoolValue(name string, def bool) *Builder {
+	v := 0.0
+	if def {
+		v = 1
+	}
+	b.g.Params = append(b.g.Params, Param{Name: name, Type: Bool, Source: Source{Kind: SourceValue, Value: v}})
+	return b
+}
+
 // TweenedValue is Value, and a change moves the param to its new value over
 // tween seconds of presentation time.
 func (b *Builder) TweenedValue(name, typ string, def, tween float64) *Builder {
@@ -81,8 +92,15 @@ func (b *Builder) Frame(name, source string) *Builder {
 	return b
 }
 
+// Node declares an f32 param the runner reads from a scene node's pose each
+// frame: field is "x", "z", "heading" or "speed" (see Source.Node).
+func (b *Builder) Node(name, node, field string) *Builder {
+	b.g.Params = append(b.g.Params, Param{Name: name, Type: F32, Source: Source{Kind: SourceNode, Node: node, Field: field}})
+	return b
+}
+
 // Expr declares a param computed each frame by op (add, sub, mul, div, mod,
-// min, max over two args; floor over one) from earlier params (Ref) or
+// min, max over two args; floor, sin, cos over one) from earlier params (Ref) or
 // numbers.
 func (b *Builder) Expr(name, typ, op string, args ...any) *Builder {
 	b.g.Params = append(b.g.Params, Param{Name: name, Type: typ, Source: Source{Kind: SourceExpr, Op: op, Args: args}})

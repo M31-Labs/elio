@@ -20,12 +20,12 @@ func TestOceanKernelSetNames(t *testing.T) {
 		got = append(got, k.Name)
 		gather[k.Name] = k.Gather
 	}
-	want := []string{"ocean_spectrum", "ocean_evolve", "ocean_assemble", "ocean_mip", "ocean_foam", "ocean_probe",
+	want := []string{"ocean_spectrum", "ocean_evolve", "ocean_assemble", "ocean_mip", "ocean_foam", "ocean_probe", "wake_source", "wake_symbol", "wake_step",
 		"fft_compute_64", "fft_gather_64", "fft_compute_128", "fft_gather_128", "fft_compute_256", "fft_gather_256"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("kernels = %v", got)
 	}
-	for _, n := range []string{"ocean_assemble", "ocean_mip", "ocean_foam", "ocean_evolve", "ocean_spectrum", "fft_gather_64"} {
+	for _, n := range []string{"ocean_assemble", "ocean_mip", "ocean_foam", "ocean_evolve", "ocean_spectrum", "fft_gather_64", "wake_source", "wake_symbol", "wake_step"} {
 		if !gather[n] {
 			t.Errorf("%s should be a gather kernel", n)
 		}

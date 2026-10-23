@@ -40,6 +40,7 @@ const (
 	SourceExpr       = "expr"       // Op over earlier params or numbers
 	SourceAccumulate = "accumulate" // integrates the param Of by dt each frame
 	SourceDelta      = "delta"      // the change of the param Of since the last frame (0 on the first)
+	SourceNode       = "node"       // a pose field of a scene node, read by the runner each frame
 )
 
 // Graph is one pass graph for one backend and tier.
@@ -74,10 +75,21 @@ type Source struct {
 	Kind  string  `json:"kind"`
 	Value float64 `json:"value"`          // value
 	Name  string  `json:"name,omitempty"` // frame
-	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor (one); mod is floored (the result takes the divisor's sign); the runner evaluates in f64
+	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor, sin, cos (one; sin and cos take radians); mod is floored (the result takes the divisor's sign); the runner evaluates in f64
 	Args  []any   `json:"args,omitempty"` // expr: "param:<name>" or a number
 	Of    string  `json:"of,omitempty"`   // accumulate, delta: "param:<name>"
+	// Node and Field name a scene node and one of its pose fields (node source).
+	// The param is f32 and the runner reads it from the scene each frame, in
+	// world units: Field "x" and "z" are metres on the ground plane; "heading"
+	// is the yaw in radians, with the node's forward direction (sin heading,
+	// cos heading) in (x, z); "speed" is the node's speed over ground in m/s.
+	// A param with a node source may be exported or used like a value param.
+	Node  string `json:"node,omitempty"`
+	Field string `json:"field,omitempty"`
 }
+
+// NodeFields are the pose fields a node source may read.
+var NodeFields = []string{"x", "z", "heading", "speed"}
 
 // MarshalJSON writes only the fields that belong to the source's kind.
 func (s Source) MarshalJSON() ([]byte, error) {
@@ -91,6 +103,8 @@ func (s Source) MarshalJSON() ([]byte, error) {
 		m["op"], m["args"] = s.Op, s.Args
 	case SourceAccumulate, SourceDelta:
 		m["of"] = s.Of
+	case SourceNode:
+		m["node"], m["field"] = s.Node, s.Field
 	}
 	return json.Marshal(m)
 }

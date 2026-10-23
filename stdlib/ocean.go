@@ -94,6 +94,45 @@ func OceanFoam() (*ir.Module, error) {
 	return parseOcean("ocean/foam.elio", OceanFoamSource, false)
 }
 
+// WakeSourceSource is the .elio source of wake_source, the first pass of a
+// ship-wake step: it clears cells that wrapped into the toroidal window, adds
+// the moving hull's pressure head to the surface the spectral operator acts on,
+// and decays and re-injects the foam turbulence. The header documents the model.
+// It is gather-compatible (two vec4 outputs).
+//
+//go:embed ocean/wake_source.elio
+var WakeSourceSource string
+
+// WakeSource builds the wake_source module from WakeSourceSource.
+func WakeSource() (*ir.Module, error) {
+	return parseOcean("ocean/wake_source.elio", WakeSourceSource, false)
+}
+
+// WakeSymbolSource is the .elio source of wake_symbol: it multiplies an FFT
+// spectrum by the deep-water operator |k| (the wake's exact dispersion). The
+// header derives the three-pass use. It is gather-compatible (one vec4 output).
+//
+//go:embed ocean/wake_symbol.elio
+var WakeSymbolSource string
+
+// WakeSymbol builds the wake_symbol module from WakeSymbolSource.
+func WakeSymbol() (*ir.Module, error) {
+	return parseOcean("ocean/wake_symbol.elio", WakeSymbolSource, false)
+}
+
+// WakeStepSource is the .elio source of wake_step: the damped leapfrog step of
+// the wake height from the spectral operator's output, with a sponge band at the
+// toroidal window edge, writing the new state and the surface texture (height,
+// gradients, turbulence). It is gather-compatible (a vec4 and an RGBA16F output).
+//
+//go:embed ocean/wake_step.elio
+var WakeStepSource string
+
+// WakeStep builds the wake_step module from WakeStepSource.
+func WakeStep() (*ir.Module, error) {
+	return parseOcean("ocean/wake_step.elio", WakeStepSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)

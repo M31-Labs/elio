@@ -15,7 +15,8 @@ import (
 )
 
 // Ocean lists the kernels the browser host needs, for `elio emit ts
-// --set ocean`: the six ocean kernels, then the FFT compute and gather forms
+// --set ocean`: the six ocean kernels, the three ship-wake kernels (wake_source,
+// wake_symbol, wake_step), then the FFT compute and gather forms
 // at n = 64, 128 and 256 (fft_compute_N, fft_gather_N). Kernels that pass
 // sema.CheckGather are marked Gather; a kernel that is meant to be gather but
 // fails the check fails the build here.
@@ -32,6 +33,9 @@ func Ocean() (ts.KernelSet, error) {
 		{"ocean_mip", "ocean_mip", stdlib.OceanMip, true},
 		{"ocean_foam", "ocean_foam", stdlib.OceanFoam, true},
 		{"ocean_probe", "ocean_probe", stdlib.OceanProbe, false},
+		{"wake_source", "wake_source", stdlib.WakeSource, true},
+		{"wake_symbol", "wake_symbol", stdlib.WakeSymbol, true},
+		{"wake_step", "wake_step", stdlib.WakeStep, true},
 	} {
 		m, err := k.build()
 		if err != nil {

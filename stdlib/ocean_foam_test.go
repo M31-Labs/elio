@@ -19,6 +19,18 @@ type foamParams struct {
 	lambda, cell     float64
 	n                [4]int
 	tile             [4]float64
+	wake             wakeFoamInput
+}
+
+// wakeFoamInput is the wake coupling of ocean_foam: the wake window's state
+// (turbulence in the z lane of each vec4), its size and cell, and where the foam
+// window sits relative to it.
+type wakeFoamInput struct {
+	width            int
+	gain, cell       float64
+	relX, relZ       float64 // foam window origin in metres from the wake window's origin corner
+	originX, originZ int     // wake window origin cell index, wrapped to [0, width)
+	state            [][4]float64
 }
 
 func (p foamParams) uniform() map[string]any {
@@ -29,6 +41,8 @@ func (p foamParams) uniform() map[string]any {
 		"lambda": p.lambda, "cell": p.cell, "_pad2": 0.0, "_pad3": 0.0,
 		"n0": int64(p.n[0]), "n1": int64(p.n[1]), "n2": int64(p.n[2]), "n3": int64(p.n[3]),
 		"size0": p.tile[0], "size1": p.tile[1], "size2": p.tile[2], "size3": p.tile[3],
+		"wakeWidth": int64(p.wake.width), "wakeGain": p.wake.gain, "wakeCell": p.wake.cell, "_pad4": 0.0,
+		"wakeRelX": p.wake.relX, "wakeRelZ": p.wake.relZ, "wakeOriginX": int64(p.wake.originX), "wakeOriginZ": int64(p.wake.originZ),
 	}
 	// The kernel samples cascade c at omX/omZ (the window origin in metres
 	// wrapped into the tile, computed here in float64 as the graph does) plus
@@ -77,6 +91,11 @@ func runOceanFoam(t *testing.T, p foamParams, state []float64, fb foamBuffers, o
 	}
 	tex := &run.Texture{Width: w, Height: w, Format: "rgba16float", Data: make([]float64, w*w*4)}
 	vars := map[string]any{"foam": p.uniform(), "foamIn": append([]float64(nil), state...), "foamOut": out, "foamTex": tex}
+	if p.wake.width > 0 {
+		vars["wakeIn"] = vec4Buf(p.wake.state)
+	} else {
+		vars["wakeIn"] = []any{[]float64{0, 0, 0, 0}}
+	}
 	for c := 0; c < 4; c++ {
 		n := p.n[c]
 		if n == 0 {
@@ -231,5 +250,63 @@ func TestOceanFoamInjectsFromCombinedJacobian(t *testing.T) {
 	t.Logf("foam after one step ranges %.3f to %.3f; %d of %d texels saturated", lo, hi, saturated, w*w)
 	if hi-lo < 0.1 {
 		t.Errorf("injection barely varies (%g to %g): the test does not exercise the Jacobian", lo, hi)
+	}
+}
+
+// With a wake, foam follows the wake's turbulence: f = max(f, saturate(gain * T))
+// where T is the wake turbulence bilinearly sampled at the foam cell centre (0
+// outside the wake window). Foam elsewhere, and with gain 0, is unchanged.
+func TestOceanFoamFollowsWakeTurbulence(t *testing.T) {
+	const w, ww = 16, 8
+	wake := wakeFoamInput{width: ww, gain: 1.5, cell: 2, originX: 5, originZ: 3, relX: -1.3, relZ: 0.9, state: make([][4]float64, ww*ww)}
+	// Turbulence by window cell (cu, cv): a ridge along cu = 3, stored toroidally.
+	turb := func(cu, cv int) float64 {
+		if cu < 0 || cu >= ww || cv < 0 || cv >= ww {
+			return 0
+		}
+		return 0.7 * math.Exp(-float64((cu-3)*(cu-3))/2) * (0.4 + 0.6*float64(cv)/ww)
+	}
+	for cv := 0; cv < ww; cv++ {
+		for cu := 0; cu < ww; cu++ {
+			wake.state[posMod(cv+wake.originZ, ww)*ww+posMod(cu+wake.originX, ww)] = [4]float64{9, 9, turb(cu, cv), 9}
+		}
+	}
+	p := foamParams{width: w, dt: 0.1, tau: 4, threshold: 0.9, gain: 0, lambda: 0.8, cell: 0.5, originX: 7, originZ: -2, wake: wake}
+	state := constState(w, 0.05)
+	got, tex := runOceanFoam(t, p, state, foamBuffers{}, run.Options{})
+	decay := math.Exp(-p.dt / p.tau)
+	var lifted int
+	for v := 0; v < w; v++ {
+		for u := 0; u < w; u++ {
+			ru, rv := posMod(u-p.originX, w), posMod(v-p.originZ, w)
+			px := (wake.relX+(float64(ru)+0.5)*p.cell)/wake.cell - 0.5
+			pz := (wake.relZ+(float64(rv)+0.5)*p.cell)/wake.cell - 0.5
+			x0, z0 := math.Floor(px), math.Floor(pz)
+			fx, fz := px-x0, pz-z0
+			T := (1-fz)*((1-fx)*turb(int(x0), int(z0))+fx*turb(int(x0)+1, int(z0))) + fz*((1-fx)*turb(int(x0), int(z0)+1)+fx*turb(int(x0)+1, int(z0)+1))
+			wf := sat(wake.gain * T)
+			want := math.Max(0.05*decay, wf)
+			if math.Abs(got[v*w+u]-want) > 1e-12 {
+				t.Fatalf("texel (%d,%d): foam %.12g, want %.12g (turbulence %.4g)", u, v, got[v*w+u], want, T)
+			}
+			if tx := tex.Data[4*(v*w+u):]; tx[0] != roundHalf(want) || tx[2] != roundHalf(wf) {
+				t.Fatalf("texel (%d,%d): texture (%g, _, %g), want (%g, _, %g)", u, v, tx[0], tx[2], roundHalf(want), roundHalf(wf))
+			}
+			if want > 0.05*decay+1e-9 {
+				lifted++
+			}
+		}
+	}
+	t.Logf("%d of %d foam texels follow the wake", lifted, w*w)
+	if lifted == 0 || lifted == w*w {
+		t.Errorf("wake foam covers %d texels: the test does not exercise the window edge", lifted)
+	}
+	// gain 0 leaves plain foam.
+	p.wake.gain = 0
+	plain, _ := runOceanFoam(t, p, state, foamBuffers{}, run.Options{})
+	for i, f := range plain {
+		if f != 0.05*decay {
+			t.Fatalf("gain 0: texel %d = %g, want %g", i, f, 0.05*decay)
+		}
 	}
 }
