@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"m31labs.dev/elio/run"
-	"m31labs.dev/elio/sema"
 )
 
 // fftInverseGather runs the Elio gather inverse FFT (unnormalized, e^{+i})
@@ -40,22 +39,13 @@ func fftInverseGather(t *testing.T, n int, buf []any) []any {
 // runWakeSymbol runs wake_symbol on a window of n x n cells, length metres wide.
 func runWakeSymbol(t *testing.T, n int, length float64, in []any) []any {
 	t.Helper()
-	m, err := WakeSymbol()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if errs := sema.Check(m); len(errs) != 0 {
-		t.Fatalf("sema: %v", sema.Errors(errs))
-	}
-	if errs := sema.CheckGather(m, "wake_symbol"); len(errs) != 0 {
-		t.Fatalf("CheckGather: %v", errs)
-	}
+	m := checkedWakeKernel(t, "wake_symbol")
 	out := make([]any, n*n)
 	for i := range out {
 		out[i] = []float64{9, 9, 9, 9}
 	}
 	vars := map[string]any{
-		"sym": map[string]any{"n": int64(n), "_pad0": int64(0), "_pad1": int64(0), "_pad2": int64(0), "length": length, "_pad3": 0.0, "_pad4": 0.0, "_pad5": 0.0},
+		"sym":   map[string]any{"n": int64(n), "_pad0": int64(0), "_pad1": int64(0), "_pad2": int64(0), "length": length, "_pad3": 0.0, "_pad4": 0.0, "_pad5": 0.0},
 		"fftIn": in, "fftOut": out,
 	}
 	if err := run.Run(m, "wake_symbol", n*n, &run.Memory{Vars: vars}); err != nil {

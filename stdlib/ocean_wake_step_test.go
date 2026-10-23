@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"m31labs.dev/elio/run"
-	"m31labs.dev/elio/sema"
 )
 
 // wakeStepParams mirrors WakeStepParams.
@@ -38,16 +37,7 @@ func vec4Buf(v [][4]float64) []any {
 // cleaned state; it returns the new state and the output texture.
 func runWakeStep(t *testing.T, p wakeStepParams, q, clean [][4]float64, opts run.Options) ([][4]float64, *run.Texture) {
 	t.Helper()
-	m, err := WakeStep()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if errs := sema.Check(m); len(errs) != 0 {
-		t.Fatalf("sema: %v", sema.Errors(errs))
-	}
-	if errs := sema.CheckGather(m, "wake_step"); len(errs) != 0 {
-		t.Fatalf("CheckGather: %v", errs)
-	}
+	m := checkedWakeKernel(t, "wake_step")
 	n2 := p.width * p.width
 	out := make([]any, n2)
 	for i := range out {

@@ -3,9 +3,12 @@ package stdlib
 import (
 	"math"
 	"math/cmplx"
+	"sync"
 	"testing"
 
+	"m31labs.dev/elio/ir"
 	"m31labs.dev/elio/run"
+	"m31labs.dev/elio/sema"
 )
 
 // fftInverseGo is the unnormalized inverse 2D FFT (e^{+i}) of the Elio kernels
@@ -76,6 +79,35 @@ func TestWakeRigFFTAgrees(t *testing.T) {
 	if e := maxErr(a, b); e > 1e-9 {
 		t.Fatalf("Go FFT differs from the Elio gather FFT by %g", e)
 	}
+}
+
+var (
+	wakeKernelMu    sync.Mutex
+	wakeKernelCache = map[string]*ir.Module{}
+)
+
+// checkedWakeKernel builds a wake kernel once per test binary and checks it
+// with sema.Check and sema.CheckGather (the interpreter never changes it).
+func checkedWakeKernel(t *testing.T, name string) *ir.Module {
+	t.Helper()
+	wakeKernelMu.Lock()
+	defer wakeKernelMu.Unlock()
+	if m, ok := wakeKernelCache[name]; ok {
+		return m
+	}
+	build := map[string]func() (*ir.Module, error){"wake_source": WakeSource, "wake_symbol": WakeSymbol, "wake_step": WakeStep}[name]
+	m, err := build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errs := sema.Check(m); len(errs) != 0 {
+		t.Fatalf("sema: %v", sema.Errors(errs))
+	}
+	if errs := sema.CheckGather(m, name); len(errs) != 0 {
+		t.Fatalf("CheckGather: %v", errs)
+	}
+	wakeKernelCache[name] = m
+	return m
 }
 
 // hullState is the hull in window coordinates, metres from the window origin

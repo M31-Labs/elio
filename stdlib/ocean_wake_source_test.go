@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"m31labs.dev/elio/run"
-	"m31labs.dev/elio/sema"
 )
 
 // wakeSourceParams mirrors WakeSourceParams. Lengths are metres, speeds m/s,
@@ -73,16 +72,7 @@ func wakeSourceRef(p wakeSourceParams, ru, rv int, state [4]float64, cleared boo
 // runWakeSource runs wake_source over a toroidal window of p.width^2 cells.
 func runWakeSource(t *testing.T, p wakeSourceParams, state [][4]float64, opts run.Options) (fftIn, clean [][4]float64) {
 	t.Helper()
-	m, err := WakeSource()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if errs := sema.Check(m); len(errs) != 0 {
-		t.Fatalf("sema: %v", sema.Errors(errs))
-	}
-	if errs := sema.CheckGather(m, "wake_source"); len(errs) != 0 {
-		t.Fatalf("CheckGather: %v", errs)
-	}
+	m := checkedWakeKernel(t, "wake_source")
 	n2 := p.width * p.width
 	in, out1, out2 := make([]any, n2), make([]any, n2), make([]any, n2)
 	for i := 0; i < n2; i++ {
