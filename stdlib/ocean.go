@@ -94,6 +94,20 @@ func OceanFoam() (*ir.Module, error) {
 	return parseOcean("ocean/foam.elio", OceanFoamSource, false)
 }
 
+// WakeSourceSource is the .elio source of wake_source, the first pass of a
+// ship-wake step: it clears cells that wrapped into the toroidal window, adds
+// the moving hull's pressure head to the surface the spectral operator acts on,
+// and decays and re-injects the foam turbulence. The header documents the model.
+// It is gather-compatible (two vec4 outputs).
+//
+//go:embed ocean/wake_source.elio
+var WakeSourceSource string
+
+// WakeSource builds the wake_source module from WakeSourceSource.
+func WakeSource() (*ir.Module, error) {
+	return parseOcean("ocean/wake_source.elio", WakeSourceSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)
