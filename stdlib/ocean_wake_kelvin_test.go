@@ -16,8 +16,9 @@ func TestKelvinMetricOnExactOperator(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			h := wakesim.Reference(v, 6, 4)
-			ang, n := wakesim.HalfAngle(h, wakesim.N, float64(wakesim.N-wakesim.Sponge-10), 2*math.Pi*v*v, 14, 60, wakesim.Sponge)
+			bow := wakesim.BowShift(10, 6) // the rig's hull is 10 cells long
+			h := wakesim.Reference(v, 6, 4, bow)
+			ang, n := wakesim.HalfAngle(h, wakesim.N, float64(wakesim.N-wakesim.Sponge-10)+bow, 2*math.Pi*v*v, 14, 60, wakesim.Sponge)
 			t.Logf("exact operator, v = %.1f sqrt(g cell): half-angle %.2f deg from %d cross-sections (transverse wavelength %.1f cells)", v, ang, n, 2*math.Pi*v*v)
 			if math.Abs(ang-19.47) > 3 || n < 10 {
 				t.Errorf("v = %.1f: half-angle %.2f deg (n = %d), want 19.47 +- 3", v, ang, n)
@@ -54,7 +55,7 @@ func TestKelvinWedgeOnKernels(t *testing.T) {
 				shifts += shift
 				r.step(hull, shift, 0)
 			}
-			ang, m := wakesim.HalfAngle(r.window(), n, hull.u, 2*math.Pi*v*v, 14, 60, wakesim.Sponge)
+			ang, m := wakesim.HalfAngle(r.window(), n, hull.u+wakesim.BowShift(r.hullLength, r.srcLength), 2*math.Pi*v*v, 14, 60, wakesim.Sponge)
 			t.Logf("kernels, v = %.1f sqrt(g cell): half-angle %.2f deg from %d cross-sections after %d window shifts", v, ang, m, shifts)
 			if math.Abs(ang-19.47) > 3 || m < 10 {
 				t.Errorf("v = %.1f: half-angle %.2f deg (n = %d), want 19.47 +- 3", v, ang, m)

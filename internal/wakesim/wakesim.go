@@ -21,6 +21,13 @@ const (
 	Steps  = 320 // 160 s
 )
 
+// BowShift is how far ahead of the hull centre the pressure patch sits (the
+// wake_source kernel): its forward edge is at the bow, so the shift is half the
+// hull length less half the patch length, never negative. Lengths in any unit.
+func BowShift(hullLength, srcLength float64) float64 {
+	return math.Max(hullLength/2-srcLength/2, 0)
+}
+
 func sat(x float64) float64 { return math.Min(math.Max(x, 0), 1) }
 
 // HalfAngle measures the half-angle (degrees) of the wake's outer energy
@@ -88,8 +95,9 @@ func HalfAngle(h []float64, n int, hullX, lambdaT, dMin, dMax float64, margin in
 }
 
 // Reference is an independent plain-Go implementation of the same model
-// with the exact operator |k|: the window is a plain array that slides.
-func Reference(v, srcLength, srcBeam float64) []float64 {
+// with the exact operator |k|: the window is a plain array that slides. The
+// pressure patch is centred bowShift cells ahead of the hull (see BowShift).
+func Reference(v, srcLength, srcBeam, bowShift float64) []float64 {
 	n := N
 	h, hp := make([]float64, n*n), make([]float64, n*n)
 	hullX, x0 := float64(n-Sponge-10), float64(n-Sponge-10)
@@ -99,7 +107,7 @@ func Reference(v, srcLength, srcBeam float64) []float64 {
 		in := make([]any, n*n)
 		for z := 0; z < n; z++ {
 			for x := 0; x < n; x++ {
-				u, w := (float64(x)+0.5-hullX)/(srcLength/2), (float64(z)+0.5-float64(n)/2)/(srcBeam/2)
+				u, w := (float64(x)+0.5-hullX-bowShift)/(srcLength/2), (float64(z)+0.5-float64(n)/2)/(srcBeam/2)
 				q := u*u + w*w
 				head := 0.0
 				if q < 1 {
@@ -135,10 +143,11 @@ func Reference(v, srcLength, srcBeam float64) []float64 {
 }
 
 // ReferenceAngle runs the exact-operator reference for a hull speed v
-// (sqrt(g cell) units) with a pressure patch srcLength x srcBeam cells.
-func ReferenceAngle(v, srcLength, srcBeam float64) (float64, int) {
-	h := Reference(v, srcLength, srcBeam)
-	return HalfAngle(h, N, float64(N-Sponge-10), 2*math.Pi*v*v, 14, 60, Sponge)
+// (sqrt(g cell) units) with a pressure patch srcLength x srcBeam cells, bowShift
+// cells ahead of the hull; the wedge's apex is the patch.
+func ReferenceAngle(v, srcLength, srcBeam, bowShift float64) (float64, int) {
+	h := Reference(v, srcLength, srcBeam, bowShift)
+	return HalfAngle(h, N, float64(N-Sponge-10)+bowShift, 2*math.Pi*v*v, 14, 60, Sponge)
 }
 
 // inverse is the unnormalized inverse 2D FFT (e^{+i}) of the first complex slot of a packed vec4 buffer.

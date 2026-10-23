@@ -72,9 +72,13 @@ func wakeSourceRef(p wakeSourceParams, ru, rv int, state [4]float64, cleared boo
 	inj := 0.4 * wakeFootprint(uh, vh, 1, 1)
 	{
 		su, sv := (uh+0.9)/0.4, vh/1.2
-		if q := su*su + sv*sv; q < 1 {
-			x := math.Min(math.Max((1-q)*2.5, 0), 1)
+		q := su*su + sv*sv
+		if q < 1 {
+			x := math.Min(math.Max((1-q)*1.7, 0), 1)
 			inj += x * x * (3 - 2*x)
+		}
+		if qx := 0.4 * q; qx < 1 {
+			inj += 0.3 * (1 - qx) * (1 - qx)
 		}
 	}
 	inj += 0.35 * wakeFootprint(uh-0.85, vh, 0.25, 0.45)

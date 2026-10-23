@@ -313,18 +313,22 @@ func TestOceanFoamFollowsWakeTurbulence(t *testing.T) {
 			x0, z0 := math.Floor(px), math.Floor(pz)
 			fx, fz := px-x0, pz-z0
 			T := (1-fz)*((1-fx)*turb(int(x0), int(z0))+fx*turb(int(x0)+1, int(z0))) + fz*((1-fx)*turb(int(x0), int(z0)+1)+fx*turb(int(x0)+1, int(z0)+1))
+			// The kernel keeps the angle of the last corner inside the window whose bilinear weight is at least 0.25.
 			theta := 0.0
-			if T > 0 {
-				theta = streakAngle // some corner inside the window with weight >= 0.25 carries the angle
+			for c, wgt := range []float64{(1 - fx) * (1 - fz), fx * (1 - fz), (1 - fx) * fz, fx * fz} {
+				cu, cv := int(x0)+c%2, int(z0)+c/2
+				if wgt >= 0.25 && cu >= 0 && cu < ww && cv >= 0 && cv < ww {
+					theta = streakAngle
+				}
 			}
 			gx, gz := (float64(p.originX+ru)+0.5)*p.cell, (float64(p.originZ+rv)+0.5)*p.cell
 			nn := math.Min(math.Max((wakeFoamNoise(gx, gz, theta)-0.25)/0.5, 0), 1)
-			wf := smoothstep01(0, 0.4, wake.gain*T-(0.12+0.76*nn))
+			wf := math.Min(math.Max(wake.gain*T*(0.55+0.9*nn), 0), 1)
 			want := 0.05 * decay
 			if math.Abs(got[v*w+u]-want) > 1e-12 {
 				t.Fatalf("texel (%d,%d): foam state %.12g, want crest foam only, %.12g", u, v, got[v*w+u], want)
 			}
-			if tx := tex.Data[4*(v*w+u):]; math.Abs(tx[2]-wf) > 2e-3 || tx[0] != roundHalf(want) {
+			if tx := tex.Data[4*(v*w+u):]; math.Abs(tx[2]-wf) > 1e-3 || tx[0] != roundHalf(want) {
 				t.Fatalf("texel (%d,%d): texture (%g, _, %g), want (%g, _, %g) (turbulence %.4g)", u, v, tx[0], tx[2], roundHalf(want), wf, T)
 			}
 			if wf > 0.5 {

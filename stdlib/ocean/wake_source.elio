@@ -43,10 +43,11 @@
 //     saturate(speed / foamSpeed) and combined by sum, capped at 1:
 //       aeration 0.4 w along the whole hull footprint (hullLen, hullBeam): the
 //         bubbly water along the hull, below the foam threshold on its own;
-//       stern wash, 1 across a flat top: smoothstep(0, 1, 2.5 (1 - q)) on an
+//       stern wash, a wide soft top: smoothstep(0, 1, 1.7 (1 - q)) on an
 //         ellipse centred at u = -0.9 (u = along / (length/2)) with semi axes
 //         0.4 (in u) and 0.6 beam: a churned band one beam wide that the hull
-//         leaves behind it;
+//         leaves behind it, plus a faint shoulder 0.3 (1 - 0.4 q)^2 about 1.6
+//         times as wide, so the band's edge fades over several cells;
 //       bow spray 0.35 w, centred at u = 0.85 with semi axes 0.25 (in u) and
 //         0.45 beam/2.
 // Turbulence T lives in the water frame and trails the hull. Per step
@@ -146,7 +147,11 @@ struct WakeSourceParams {
   let sv = vh / 1.2;
   let qw = su * su + sv * sv;
   if qw < 1.0 {
-    inj = inj + smoothstep(0.0, 1.0, (1.0 - qw) * 2.5);
+    inj = inj + smoothstep(0.0, 1.0, (1.0 - qw) * 1.7);
+  }
+  let qx = qw * 0.4;
+  if qx < 1.0 {
+    inj = inj + 0.3 * (1.0 - qx) * (1.0 - qx);
   }
   let bu = (uh - 0.85) / 0.25;
   let bv = vh / 0.45;

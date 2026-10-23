@@ -35,7 +35,7 @@
 // wake foam: the wake window's turbulence T (the z lane of wakeIn, a wakeWidth^2
 // vec4 buffer in the toroidal layout of wake_source), bilinear at the foam cell
 // centre in wake cells (cell size wakeCell metres) and 0 outside the wake window,
-// compared with a noise threshold (see the code). wf is separate from f: the foam
+// modulated by streaky noise (see the code). wf is separate from f: the foam
 // state f holds crest foam only, so the wake's foam follows the churned water
 // instead of lingering. The wake window's turbulence persists for its own
 // time constant, so the trail outlives the crest foam's tau. Positions use
@@ -291,13 +291,12 @@ struct OceanFoamParams {
         let h11 = fract(sin(12.9898 * (ma + 1.0) + 78.233 * (mb + 1.0) + ph) * 43758.5453);
         nsum = nsum + amp * mix(mix(h00, h10, ea), mix(h01, h11, ea), eb);
       }
-      // Foam where the turbulence beats a threshold that the noise moves between
-      // 0.12 and 0.88: dense water is white, thin water breaks into streaks and
-      // flecks with ragged edges. The ramp is soft (0.4 wide) so the surface can
-      // dissolve it further per pixel.
+      // Wake foam density: the turbulence, scaled by the noise between 0.55 and
+      // 1.45 and clamped to 0..1. Streaks and patches thin the foam without ever
+      // cutting it: there is no threshold, so the surface can show lace and fade
+      // the edges over a wide band.
       let nn = clamp((nsum - 0.25) / 0.5, 0.0, 1.0);
-      let thr = 0.12 + 0.76 * nn;
-      wf = smoothstep(0.0, 0.4, foam.wakeGain * turb - thr);
+      wf = clamp(foam.wakeGain * turb * (0.55 + 0.9 * nn), 0.0, 1.0);
     }
   }
   foamOut[i] = f;

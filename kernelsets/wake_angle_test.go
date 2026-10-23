@@ -92,7 +92,9 @@ func TestOceanWakeGraphRulesGiveKelvinAngle(t *testing.T) {
 				cell := v["wakeCell"]
 				lambda := 2 * math.Pi * v["hullSpeed"] * v["hullSpeed"] / v["wakeGEff"] // metres
 				vSim := math.Sqrt(lambda / cell / (2 * math.Pi))                        // sqrt(g cell) units
-				ang, n := wakesim.ReferenceAngle(vSim, v["wakeSrcLength"]/cell, v["wakeSrcBeam"]/cell)
+				// The kernel puts the patch at the bow. The reference window is 128 cells and the wedge only translates with the patch, so the
+				// shift is capped at 8 cells to keep a long hull's patch inside it.
+				ang, n := wakesim.ReferenceAngle(vSim, v["wakeSrcLength"]/cell, v["wakeSrcBeam"]/cell, math.Min(wakesim.BowShift(hull/cell, v["wakeSrcLength"]/cell), 8))
 				out[hi*len(speeds)+si] = result{hull, kn, lambda / cell, v["wakeSrcLength"] / cell, ang}
 				if n < 8 {
 					t.Errorf("%g m at %g kn: only %d cross-sections", hull, kn, n)
