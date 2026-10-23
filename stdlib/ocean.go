@@ -120,6 +120,19 @@ func WakeSymbol() (*ir.Module, error) {
 	return parseOcean("ocean/wake_symbol.elio", WakeSymbolSource, false)
 }
 
+// WakeStepSource is the .elio source of wake_step: the damped leapfrog step of
+// the wake height from the spectral operator's output, with a sponge band at the
+// toroidal window edge, writing the new state and the surface texture (height,
+// gradients, turbulence). It is gather-compatible (a vec4 and an RGBA16F output).
+//
+//go:embed ocean/wake_step.elio
+var WakeStepSource string
+
+// WakeStep builds the wake_step module from WakeStepSource.
+func WakeStep() (*ir.Module, error) {
+	return parseOcean("ocean/wake_step.elio", WakeStepSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)
