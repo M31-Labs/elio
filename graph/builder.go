@@ -60,6 +60,17 @@ func (b *Builder) Value(name, typ string, def float64) *Builder {
 	return b
 }
 
+// BoolValue declares a bool param the app sets, for pass conditions
+// ("param:<name>"); expressions read it as 1 or 0.
+func (b *Builder) BoolValue(name string, def bool) *Builder {
+	v := 0.0
+	if def {
+		v = 1
+	}
+	b.g.Params = append(b.g.Params, Param{Name: name, Type: Bool, Source: Source{Kind: SourceValue, Value: v}})
+	return b
+}
+
 // TweenedValue is Value, and a change moves the param to its new value over
 // tween seconds of presentation time.
 func (b *Builder) TweenedValue(name, typ string, def, tween float64) *Builder {

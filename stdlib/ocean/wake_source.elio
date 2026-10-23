@@ -34,7 +34,7 @@
 //   pressure patch: semi axes srcLength/2 and srcBeam/2, head
 //     e = depth * fade^2 * w, fade = saturate(speed / fullSpeed), so a hull at
 //     rest forces nothing and the wake amplitude grows with speed squared;
-//   foam: the hull footprint (length, beam). Under the stern half the hull
+//   foam: the hull footprint (hullLen, hullBeam). Under the stern half the hull
 //     injects turbulence 0.8 w (0.5 - 0.5 u) (u = along / (length/2), clamped
 //     to [-1, 1]: full at the stern, none at the bow) and a bow spray ellipse
 //     centred at u = 0.85 with semi axes 0.25 (in u) and 0.45 beam/2 injects
@@ -62,8 +62,8 @@ struct WakeSourceParams {
   hullV: f32;
   heading: f32;
   speed: f32;
-  length: f32;
-  beam: f32;
+  hullLen: f32;
+  hullBeam: f32;
   srcLength: f32;
   srcBeam: f32;
   fullSpeed: f32;
@@ -118,8 +118,8 @@ struct WakeSourceParams {
   }
 
   // Foam: hull footprint (stern-weighted) and bow spray.
-  let uh = along / (0.5 * wake.length);
-  let vh = across / (0.5 * wake.beam);
+  let uh = along / (0.5 * wake.hullLen);
+  let vh = across / (0.5 * wake.hullBeam);
   let qh = uh * uh + vh * vh;
   var inj = 0.0;
   if qh < 1.0 {

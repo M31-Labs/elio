@@ -44,7 +44,7 @@ func runWakeStep(t *testing.T, p wakeStepParams, q, clean [][4]float64, opts run
 		out[i] = []float64{9, 9, 9, 9}
 	}
 	tex := &run.Texture{Width: p.width, Height: p.width, Format: "rgba16float", Data: make([]float64, n2*4)}
-	vars := map[string]any{"step": p.uniform(), "qIn": vec4Buf(q), "cleanIn": vec4Buf(clean), "stateOut": out, "wakeTex": tex}
+	vars := map[string]any{"wstep": p.uniform(), "qIn": vec4Buf(q), "cleanIn": vec4Buf(clean), "stateOut": out, "wakeTex": tex}
 	if err := run.RunWith(m, "wake_step", n2, &run.Memory{Vars: vars}, opts); err != nil {
 		t.Fatal(err)
 	}

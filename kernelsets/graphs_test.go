@@ -47,15 +47,24 @@ func TestOceanGraphsValidate(t *testing.T) {
 // mips; webgl2 replaces the FFT with 4 log2(n) stages and the mips with 2
 // mipmap passes. Then foam (1 + mips: 10 on webgpu, 1 mipmap on webgl2) and,
 // on webgpu, one probe.
+// The wake adds, per graph: source, the forward FFT (rows and columns), the
+// symbol, the second FFT, the step, and the mip chain of the 256 x 256 wake
+// texture (8 levels above the base on webgpu, one mipmap on webgl2). The FFT is
+// 2 dispatches on webgpu and 8 stages per axis (16 passes) on webgl2.
+const (
+	wakeGPUPasses = 1 + 2 + 1 + 2 + 1 + 8
+	wakeGL2Passes = 1 + 16 + 1 + 16 + 1 + 1
+)
+
 func TestOceanGraphPassCounts(t *testing.T) {
 	gs, _ := loadGraphs(t)
 	want := map[string]int{
-		"webgpu/high":   4 + 4 + 16 + 4 + (12 + 3*16) + 1 + 10 + 1,
-		"webgpu/medium": 4 + 4 + 16 + 4 + (12 + 3*14) + 1 + 10 + 1,
-		"webgpu/low":    3 + 3 + 12 + 3 + 3*12 + 1 + 10 + 1,
-		"webgl2/high":   4 + 4 + (24 + 3*32) + 4 + 8 + 1 + 1,
-		"webgl2/medium": 4 + 4 + (24 + 3*28) + 4 + 8 + 1 + 1,
-		"webgl2/low":    3 + 3 + 3*24 + 3 + 6 + 1 + 1,
+		"webgpu/high":   4 + 4 + 16 + 4 + (12 + 3*16) + 1 + 10 + 1 + wakeGPUPasses,
+		"webgpu/medium": 4 + 4 + 16 + 4 + (12 + 3*14) + 1 + 10 + 1 + wakeGPUPasses,
+		"webgpu/low":    3 + 3 + 12 + 3 + 3*12 + 1 + 10 + 1 + wakeGPUPasses,
+		"webgl2/high":   4 + 4 + (24 + 3*32) + 4 + 8 + 1 + 1 + wakeGL2Passes,
+		"webgl2/medium": 4 + 4 + (24 + 3*28) + 4 + 8 + 1 + 1 + wakeGL2Passes,
+		"webgl2/low":    3 + 3 + 3*24 + 3 + 6 + 1 + 1 + wakeGL2Passes,
 	}
 	for key, n := range want {
 		flat, err := graph.Expand(gs[key])
@@ -69,8 +78,8 @@ func TestOceanGraphPassCounts(t *testing.T) {
 	// FFT stages (WebGL2) and mip levels (WebGPU) are repeats, so no graph
 	// lists more than 45 passes.
 	for _, key := range graphKeys {
-		if top := len(gs[key].Passes); top > 45 {
-			t.Errorf("%s: %d top-level passes; stages and mip levels should be repeats", key, top)
+		if top := len(gs[key].Passes); top > 55 {
+			t.Errorf("%s: %d top-level passes (limit 55); stages and mip levels should be repeats", key, top)
 		}
 	}
 }
@@ -83,7 +92,7 @@ func TestOceanGraphExportsAndParams(t *testing.T) {
 		if g.Tier == "low" {
 			cascades = 3
 		}
-		want := []string{"foam"}
+		want := []string{"foam", "wake"}
 		for c := 0; c < cascades; c++ {
 			want = append(want, "disp"+string(rune('0'+c)), "slope"+string(rune('0'+c)))
 		}
@@ -104,7 +113,8 @@ func TestOceanGraphExportsAndParams(t *testing.T) {
 		}
 		for _, n := range []string{"dt", "cameraX", "cameraZ", "timeScale", "driftX", "driftZ", "windSpeed", "fetch", "gamma", "spread",
 			"swell", "windDirDeg", "swellDirDeg", "seed", "loopPeriod", "lambda", "foamTau", "foamThreshold", "foamGain",
-			"windDir", "swellDir", "simTime", "phaseTime", "waterX", "waterZ", "foamOriginX", "foamOriginZ", "foamShiftX", "foamShiftZ", "probeCount"} {
+			"windDir", "swellDir", "simTime", "phaseTime", "waterX", "waterZ", "foamOriginX", "foamOriginZ", "foamShiftX", "foamShiftZ", "probeCount",
+			"wakeEnabled", "wakeCell", "hullX", "hullZ", "hullHeading", "hullSpeed", "hullLength", "hullBeam", "wakeOriginX", "wakeOriginZ", "wakeShiftX", "wakeShiftZ"} {
 			if !params[n] {
 				t.Errorf("%s: no param %s", key, n)
 			}
@@ -183,8 +193,9 @@ func TestOceanGraphWaterWrap(t *testing.T) {
 				}
 			}
 		}
-		if strings.Join(g.ExportParams, ",") != strings.Join(want, ",") {
-			t.Errorf("%s: exportParams %v, want %v", key, g.ExportParams, want)
+		// The wake's surface params follow the water offsets (TestOceanGraphWake).
+		if len(g.ExportParams) < len(want) || strings.Join(g.ExportParams[:len(want)], ",") != strings.Join(want, ",") {
+			t.Errorf("%s: exportParams %v, want %v first", key, g.ExportParams, want)
 		}
 	}
 }

@@ -45,7 +45,7 @@ func runWakeSymbol(t *testing.T, n int, length float64, in []any) []any {
 		out[i] = []float64{9, 9, 9, 9}
 	}
 	vars := map[string]any{
-		"sym":   map[string]any{"n": int64(n), "_pad0": int64(0), "_pad1": int64(0), "_pad2": int64(0), "length": length, "_pad3": 0.0, "_pad4": 0.0, "_pad5": 0.0},
+		"sym":   map[string]any{"n": int64(n), "_pad0": int64(0), "_pad1": int64(0), "_pad2": int64(0), "window": length, "_pad3": 0.0, "_pad4": 0.0, "_pad5": 0.0},
 		"fftIn": in, "fftOut": out,
 	}
 	if err := run.Run(m, "wake_symbol", n*n, &run.Memory{Vars: vars}); err != nil {

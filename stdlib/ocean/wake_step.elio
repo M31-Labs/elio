@@ -45,7 +45,7 @@ struct WakeStepParams {
   cell: f32;
 }
 
-@group(0) @binding(0) uniform step: WakeStepParams;
+@group(0) @binding(0) uniform wstep: WakeStepParams;
 @group(0) @binding(1) storage read qIn: []vec4;
 @group(0) @binding(2) storage read cleanIn: []vec4;
 @group(0) @binding(3) storage read_write stateOut: []vec4;
@@ -53,7 +53,7 @@ struct WakeStepParams {
 
 @workgroup(64) kernel wake_step(gid: global_invocation_id) {
   let i = gid.x;
-  let w = step.width;
+  let w = wstep.width;
   if i >= w * w { return; }
   let wi = i32(w);
   let cx = i32(i % w);
@@ -75,13 +75,13 @@ struct WakeStepParams {
     let xi = (cx + ox + wi) % wi;
     let zi = (cz + oz + wi) % wi;
     let j = u32(zi * wi + xi);
-    let ru = ((xi - step.originX) % wi + wi) % wi;
-    let rv = ((zi - step.originZ) % wi + wi) % wi;
+    let ru = ((xi - wstep.originX) % wi + wi) % wi;
+    let rv = ((zi - wstep.originZ) % wi + wi) % wi;
     let edge = min(min(ru, rv), min(wi - 1 - ru, wi - 1 - rv));
-    let t = clamp((step.sponge - f32(edge)) / max(step.sponge, 0.001), 0.0, 1.0);
-    let beta = max(1.0 - (step.alpha + step.spongeRate * t * t) * step.dt, 0.0);
+    let t = clamp((wstep.sponge - f32(edge)) / max(wstep.sponge, 0.001), 0.0, 1.0);
+    let beta = max(1.0 - (wstep.alpha + wstep.spongeRate * t * t) * wstep.dt, 0.0);
     let s = cleanIn[j];
-    let hn = s.x + beta * (s.x - s.y) - step.dt * step.dt * step.gravity * qIn[j].x;
+    let hn = s.x + beta * (s.x - s.y) - wstep.dt * wstep.dt * wstep.gravity * qIn[j].x;
     if c == 0u { h0 = hn; }
     if c == 1u { h1 = hn; }
     if c == 2u { h2 = hn; }
@@ -90,5 +90,5 @@ struct WakeStepParams {
   }
   let own = cleanIn[i];
   stateOut[i] = vec4(h0, own.x, own.z, 0.0);
-  textureStore(wakeTex, vec2u(i % w, i / w), vec4(h0, (h1 - h2) / (2.0 * step.cell), (h3 - h4) / (2.0 * step.cell), own.z));
+  textureStore(wakeTex, vec2u(i % w, i / w), vec4(h0, (h1 - h2) / (2.0 * wstep.cell), (h3 - h4) / (2.0 * wstep.cell), own.z));
 }

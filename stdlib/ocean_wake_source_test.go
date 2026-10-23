@@ -29,7 +29,7 @@ func (p wakeSourceParams) uniform() map[string]any {
 		"originX": int64(p.originX), "originZ": int64(p.originZ), "shiftX": int64(p.shiftX), "shiftZ": int64(p.shiftZ),
 		"cell": p.cell, "dt": p.dt, "tau": p.tau, "depth": p.depth,
 		"hullU": p.hullU, "hullV": p.hullV, "heading": p.heading, "speed": p.speed,
-		"length": p.length, "beam": p.beam, "srcLength": p.srcLength, "srcBeam": p.srcBeam,
+		"hullLen": p.length, "hullBeam": p.beam, "srcLength": p.srcLength, "srcBeam": p.srcBeam,
 		"fullSpeed": p.fullSpeed, "foamSpeed": p.foamSpeed, "_pad2": 0.0, "_pad3": 0.0,
 	}
 }
