@@ -206,3 +206,36 @@ func TestDefaultsAreOmittedFromJSON(t *testing.T) {
 		t.Fatal("no passes")
 	}
 }
+
+// An empty type is a kernel pass, and an empty entry is the kernel's primary
+// entry; both are omitted from JSON.
+func TestKernelPassDefaultsAreOmitted(t *testing.T) {
+	g := validGraph()
+	for i := range g.Passes {
+		g.Passes[i].Type = ""
+		if g.Passes[i].Kernel != "fft_compute_64" {
+			g.Passes[i].Entry = ""
+		}
+	}
+	g.Passes[1].Entry = "" // fft_compute_64's primary entry is fft_rows
+	if err := graph.Validate(g, kernels(t)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(g.Passes[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"type"`) || strings.Contains(string(b), `"entry"`) {
+		t.Errorf("defaults in JSON: %s", b)
+	}
+	flat, err := graph.Expand(g)
+	if err != nil || len(flat.Passes) != 4 {
+		t.Fatalf("expand: %v, %d passes", err, len(flat.Passes))
+	}
+	// The cols entry is not the primary one, so it is kept.
+	g.Passes[1].Entry = "fft_cols"
+	if err := graph.Validate(g, kernels(t)); err != nil {
+		t.Fatal(err)
+	}
+	// A webgl2 pass must still use the gather entry: an empty entry is it.
+}

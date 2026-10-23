@@ -11,6 +11,7 @@ package graph
 
 import (
 	"encoding/json"
+	"reflect"
 
 	"m31labs.dev/elio/ir"
 )
@@ -49,11 +50,15 @@ type Graph struct {
 	Backend    string            `json:"backend"`
 	Tier       string            `json:"tier"`
 	Version    int               `json:"version"`
-	Params     []Param           `json:"params"`
+	Params     []Param           `json:"params,omitempty"`
 	Resources  []Resource        `json:"resources"`
 	Passes     []Pass            `json:"passes"`
 	FrameSwaps [][2]string       `json:"frameSwaps"`
 	Exports    map[string]string `json:"exports"`
+	// ParamsFrom, set only on emitted graphs, names the key of another graph
+	// of the same backend from which this one takes Params and ExportParams
+	// (which it then leaves empty). The named graph never has ParamsFrom.
+	ParamsFrom string `json:"paramsFrom,omitempty"`
 	// ExportParams lists numeric params the surface binds as uniforms (for
 	// example a water offset wrapped per cascade).
 	ExportParams []string `json:"exportParams,omitempty"`
@@ -76,7 +81,7 @@ type Source struct {
 	Value float64 `json:"value"`          // value
 	Name  string  `json:"name,omitempty"` // frame
 	Op    string  `json:"op,omitempty"`   // expr: add, sub, mul, div, mod, min, max (two args), floor, sin, cos (one; sin and cos take radians); mod is floored (the result takes the divisor's sign); the runner evaluates in f64
-	Args  []any   `json:"args,omitempty"` // expr: "param:<name>" or a number
+	Args  []any   `json:"args,omitempty"` // expr: "param:<name>", a number or an Expr
 	Of    string  `json:"of,omitempty"`   // accumulate, delta: "param:<name>"
 	// Node and Field name a scene node and one of its pose fields (node source).
 	// The param is f32 and the runner reads it from the scene each frame, in
@@ -90,6 +95,19 @@ type Source struct {
 
 // NodeFields are the pose fields a node source may read.
 var NodeFields = []string{"x", "z", "heading", "speed"}
+
+// Expr is an expression used as an argument of another expression (Source.Args
+// or an Expr's own Args), so a chain of single-use steps is one param. An
+// argument is "param:<name>", a number, or an Expr; the runner evaluates it
+// depth first in f64, with the same ops as an expr source. Decoded from JSON an
+// Expr is a map with keys "op" and "args".
+type Expr struct {
+	Op   string `json:"op"`
+	Args []any  `json:"args"`
+}
+
+// E builds an Expr.
+func E(op string, args ...any) Expr { return Expr{Op: op, Args: args} }
 
 // MarshalJSON writes only the fields that belong to the source's kind.
 func (s Source) MarshalJSON() ([]byte, error) {
@@ -126,7 +144,14 @@ type Resource struct {
 	Feed string `json:"feed,omitempty"`
 }
 
-// Pass is a kernel pass, a mipmap pass or a repeat of other passes.
+// Pass is a kernel pass, a mipmap pass, a copy pass or a repeat of other passes.
+//
+// A copy pass (WebGL2 only) copies the buffer From into the buffer To, keeping
+// the elements in order but laying them out Width texels wide: both buffers
+// have the same element type and count, and To is declared with Width. A WebGL2
+// kernel pass may read a buffer only at its own width (Target.ElioWidth), so a
+// pass wider or narrower than the buffer it reads is given a copy made by an
+// earlier copy pass. A runner copies by texture blit or by reading and drawing.
 //
 // A repeat runs Body Count times with the param named Index set to 0 to
 // Count-1 (body uniform values refer to it as "param:<Index>"), and after
@@ -137,9 +162,11 @@ type Resource struct {
 // with every resource where it began (FrameSwaps aside).
 type Pass struct {
 	Name   string `json:"name"`
-	Type   string `json:"type"` // "kernel", "mipmap" or "repeat"
+	Type   string `json:"type,omitempty"` // "kernel" (the default when empty), "mipmap", "copy" or "repeat"
 	Kernel string `json:"kernel,omitempty"`
-	Entry  string `json:"entry,omitempty"`
+	// Entry is the kernel's entry point; empty means the kernel's primary entry
+	// (the Entry of its Kernel in the kernel set).
+	Entry string `json:"entry,omitempty"`
 	// When is "always" (or empty, which is omitted from JSON), "param:<boolParam>" or "changed:<p1>,<p2>,...": the
 	// pass runs on the first frame and on any frame when one of those params
 	// changed (a tween counts).
@@ -149,6 +176,9 @@ type Pass struct {
 	Bindings []Binding `json:"bindings,omitempty"`
 	Uniforms []Uniform `json:"uniforms,omitempty"`
 	Resource string    `json:"resource,omitempty"` // mipmap: the texture
+	From     string    `json:"from,omitempty"`     // copy: the source buffer
+	To       string    `json:"to,omitempty"`       // copy: the destination buffer
+	Width    int       `json:"width,omitempty"`    // copy: the destination's width in texels
 
 	Count int         `json:"count,omitempty"` // repeat: iterations
 	Index string      `json:"index,omitempty"` // repeat: the iteration param
@@ -205,4 +235,24 @@ type Kernel struct {
 	Entry  string // primary entry; for a gather kernel, the gather entry
 	Module *ir.Module
 	Gather bool
+}
+
+// SameParams reports whether a and b declare the same params and exported
+// params.
+func SameParams(a, b Graph) bool {
+	return reflect.DeepEqual(a.Params, b.Params) && reflect.DeepEqual(a.ExportParams, b.ExportParams)
+}
+
+// Share returns g with its params and exported params replaced by a reference
+// to the graph under key, for emission. g is not modified.
+func Share(g Graph, key string) Graph {
+	g.Params, g.ExportParams, g.ParamsFrom = nil, nil, key
+	return g
+}
+
+// Unshare returns g with the params and exported params of base, the graph its
+// ParamsFrom names, and no reference.
+func Unshare(g, base Graph) Graph {
+	g.Params, g.ExportParams, g.ParamsFrom = base.Params, base.ExportParams, ""
+	return g
 }

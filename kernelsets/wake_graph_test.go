@@ -97,8 +97,13 @@ func TestOceanGraphWake(t *testing.T) {
 				foamWake = b.Resource
 			}
 		}
-		if foamWake != "wakeB" {
-			t.Errorf("%s: foam wakeIn bound to %q, want wakeB", key, foamWake)
+		// WebGL2 reads a copy of wakeB laid out as wide as the foam pass.
+		wantWake := "wakeB"
+		if g.Backend == "webgl2" {
+			wantWake = "wakeB_w"
+		}
+		if foamWake != wantWake {
+			t.Errorf("%s: foam wakeIn bound to %q, want %s", key, foamWake, wantWake)
 		}
 		if got := foam.Uniforms[0].Values["wakeGain"]; got != "param:wakeFoamGainEff" {
 			t.Errorf("%s: foam wakeGain = %v", key, got)

@@ -112,6 +112,9 @@ func (e *expander) plain(p Pass, env map[string]int, prefix, when string) Pass {
 	if p.Resource != "" {
 		q.Resource = e.resolve(p.Resource)
 	}
+	if p.Type == "copy" {
+		q.From, q.To = e.resolve(p.From), e.resolve(p.To)
+	}
 	if p.Bindings != nil {
 		q.Bindings = make([]Binding, len(p.Bindings))
 		for i, b := range p.Bindings {

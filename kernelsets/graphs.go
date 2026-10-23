@@ -156,17 +156,17 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		b.BufferParam("probePoints", "vec4<f32>", probeMax)
 	}
 	b.Frame("dt", "dt").Frame("cameraX", "cameraX").Frame("cameraZ", "cameraZ")
-	b.Expr("windDirRad", graph.F32, "mul", ref("windDirDeg"), deg)
-	b.Expr("windDir", graph.F32, "sub", math.Pi/2, ref("windDirRad"))
-	b.Expr("swellDirRad", graph.F32, "mul", ref("swellDirDeg"), deg)
-	b.Expr("swellDir", graph.F32, "sub", math.Pi/2, ref("swellDirRad"))
+	e := graph.E
+	b.Expr("windDir", graph.F32, "sub", math.Pi/2, e("mul", ref("windDirDeg"), deg))
+	b.Expr("swellDir", graph.F32, "sub", math.Pi/2, e("mul", ref("swellDirDeg"), deg))
 	b.Accumulate("simTime", "timeScale")
 	b.Expr("phaseTime", graph.F32, "mod", ref("simTime"), ref("loopPeriod"))
 	b.Accumulate("waterX", "driftX").Accumulate("waterZ", "driftZ")
 	// The surface samples cascade c at (xz - water) / size. The water offset
 	// grows without bound, so the runner wraps it to each cascade's tile in
-	// f64 and the surface binds the wrapped values.
-	for c := 0; c < cascades; c++ {
+	// f64 and the surface binds the wrapped values. Every tier declares all four
+	// cascades' params, so the tiers share one param list.
+	for c := 0; c < len(oceanCascades); c++ {
 		for _, ax := range []string{"X", "Z"} {
 			n := fmt.Sprintf("waterMod%s%d", ax, c)
 			b.Expr(n, graph.F32, "mod", ref("water"+ax), oceanCascades[c].size)
@@ -174,22 +174,18 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		}
 	}
 	for _, ax := range []string{"X", "Z"} {
-		b.Expr("foamRel"+ax, graph.F32, "sub", ref("camera"+ax), ref("water"+ax))
-		b.Expr("foamTexel"+ax, graph.F32, "div", ref("foamRel"+ax), foamCell)
-		b.Expr("foamCell"+ax, graph.F32, "floor", ref("foamTexel"+ax))
-		b.Expr("foamOrigin"+ax, graph.I32, "sub", ref("foamCell"+ax), foamWidth/2)
+		// The foam window origin in whole cells, in the water frame.
+		b.Expr("foamOrigin"+ax, graph.I32, "sub", e("floor", e("div", e("sub", ref("camera"+ax), ref("water"+ax)), foamCell)), foamWidth/2)
 		b.Delta("foamShift"+ax, graph.I32, "foamOrigin"+ax)
 		// The foam kernel samples cascade c at the window origin wrapped into
 		// the tile plus a local offset, so it forms no large coordinate in f32.
-		b.Expr("foamOriginMeters"+ax, graph.F32, "mul", ref("foamOrigin"+ax), foamCell)
-		for c := 0; c < cascades; c++ {
-			b.Expr(fmt.Sprintf("foamOriginMod%d%s", c, ax), graph.F32, "mod", ref("foamOriginMeters"+ax), oceanCascades[c].size)
+		for c := 0; c < len(oceanCascades); c++ {
+			b.Expr(fmt.Sprintf("foamOriginMod%d%s", c, ax), graph.F32, "mod", e("mul", ref("foamOrigin"+ax), foamCell), oceanCascades[c].size)
 		}
 		if gpu {
 			// The probe's point origin in the water frame, wrapped per cascade.
-			b.Expr("probeLocal"+ax, graph.F32, "sub", ref("probeOrigin"+ax), ref("water"+ax))
-			for c := 0; c < cascades; c++ {
-				b.Expr(fmt.Sprintf("probeOriginMod%d%s", c, ax), graph.F32, "mod", ref("probeLocal"+ax), oceanCascades[c].size)
+			for c := 0; c < len(oceanCascades); c++ {
+				b.Expr(fmt.Sprintf("probeOriginMod%d%s", c, ax), graph.F32, "mod", e("sub", ref("probeOrigin"+ax), ref("water"+ax)), oceanCascades[c].size)
 			}
 		}
 	}
@@ -211,25 +207,21 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 	b.Delta("wakeEdge", graph.I32, "wakeEnabled")
 	b.Expr("wakeReset", graph.U32, "max", ref("wakeEdge"), 0.0)
 	b.Expr("wakeLength", graph.F32, "mul", ref("wakeCell"), wakeN)
-	b.Expr("hullSin", graph.F32, "sin", ref("hullHeading"))
-	b.Expr("hullCos", graph.F32, "cos", ref("hullHeading"))
-	b.Expr("wakeBias", graph.F32, "mul", ref("wakeCell"), wakeBias*wakeN)
-	b.Expr("wakeHalf", graph.F32, "mul", ref("wakeCell"), wakeN/2)
-	for _, ax := range []struct{ name, dir string }{{"X", "hullSin"}, {"Z", "hullCos"}} {
+	// The wake window's corner is the hull, less wakeBias of the window along
+	// the heading, less half the window; origin and the hull's place in it are
+	// whole cells and small offsets, all derived in float64.
+	cell := ref("wakeCell")
+	for _, ax := range []struct{ name, uv, dir string }{{"X", "U", "sin"}, {"Z", "V", "cos"}} {
 		a := ax.name
 		b.Expr("hullWater"+a, graph.F32, "sub", ref("hull"+a), ref("water"+a))
-		b.Expr("wakeBias"+a, graph.F32, "mul", ref(ax.dir), ref("wakeBias"))
-		b.Expr("wakeCenter"+a, graph.F32, "sub", ref("hullWater"+a), ref("wakeBias"+a))
-		b.Expr("wakeCorner"+a, graph.F32, "sub", ref("wakeCenter"+a), ref("wakeHalf"))
-		b.Expr("wakeTexel"+a, graph.F32, "div", ref("wakeCorner"+a), ref("wakeCell"))
-		b.Expr("wakeOrigin"+a, graph.I32, "floor", ref("wakeTexel"+a))
+		corner := e("sub", e("sub", ref("hullWater"+a), e("mul", e(ax.dir, ref("hullHeading")), e("mul", cell, wakeBias*wakeN))), e("mul", cell, wakeN/2))
+		b.Expr("wakeOrigin"+a, graph.I32, "floor", e("div", corner, cell))
 		b.Delta("wakeShift"+a, graph.I32, "wakeOrigin"+a)
-		b.Expr("wakeOriginM"+a, graph.F32, "mul", ref("wakeOrigin"+a), ref("wakeCell"))
-		b.Expr("wakeHull"+map[string]string{"X": "U", "Z": "V"}[a], graph.F32, "sub", ref("hullWater"+a), ref("wakeOriginM"+a))
+		originM := e("mul", ref("wakeOrigin"+a), cell)
+		b.Expr("wakeHull"+ax.uv, graph.F32, "sub", ref("hullWater"+a), originM)
 		b.Expr("wakeOriginMod"+a, graph.I32, "mod", ref("wakeOrigin"+a), wakeN)
-		b.Expr("wakeRel"+a, graph.F32, "sub", ref("foamOriginMeters"+a), ref("wakeOriginM"+a))
-		b.Expr("wakeWorldOrigin"+a, graph.F32, "add", ref("water"+a), ref("wakeOriginM"+a))
-		b.Expr("wakeCamRel"+a, graph.F32, "sub", ref("wakeWorldOrigin"+a), ref("camera"+a))
+		b.Expr("wakeRel"+a, graph.F32, "sub", e("mul", ref("foamOrigin"+a), foamCell), originM)
+		b.Expr("wakeCamRel"+a, graph.F32, "sub", e("add", ref("water"+a), originM), ref("camera"+a))
 	}
 	// Gravity and step. The transverse wavelength is 2 pi V^2 / g_eff, which is
 	// unresolved on the grid at low speed. So g_eff = min(g, 2 pi V^2 / (wakeMinLambdaCells
@@ -238,28 +230,16 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 	// held at wakeMinLambdaCells cells below that, so a slow hull still shows a
 	// Kelvin wedge, with longer waves than the real ones. g_eff is also capped by
 	// the stability limit. The step is the frame time (scaled) up to wakeDtCap.
-	b.Expr("hullSpeedSq", graph.F32, "mul", ref("hullSpeed"), ref("hullSpeed"))
-	b.Expr("wakeLamM", graph.F32, "mul", ref("wakeMinLambdaCells"), ref("wakeCell"))
-	b.Expr("wakeGScale", graph.F32, "div", 2*math.Pi, ref("wakeLamM"))
-	b.Expr("wakeGFloor", graph.F32, "mul", ref("hullSpeedSq"), ref("wakeGScale"))
-	b.Expr("wakeGWanted", graph.F32, "min", ref("wakeGravity"), ref("wakeGFloor"))
-	b.Expr("wakeGMax", graph.F32, "mul", ref("wakeCell"), wakeGMaxPerCell)
-	b.Expr("wakeGCapped", graph.F32, "min", ref("wakeGWanted"), ref("wakeGMax"))
-	b.Expr("wakeGEff", graph.F32, "max", ref("wakeGCapped"), 0.05)
-	b.Expr("wakeStep", graph.F32, "mul", ref("dt"), ref("timeScale"))
-	b.Expr("wakeDt", graph.F32, "min", ref("wakeStep"), wakeDtCap)
+	speedSq := e("mul", ref("hullSpeed"), ref("hullSpeed"))
+	b.Expr("wakeGEff", graph.F32, "max",
+		e("min", e("min", ref("wakeGravity"), e("mul", speedSq, e("div", 2*math.Pi, e("mul", ref("wakeMinLambdaCells"), cell)))), e("mul", cell, wakeGMaxPerCell)),
+		0.05)
+	b.Expr("wakeDt", graph.F32, "min", e("mul", ref("dt"), ref("timeScale")), wakeDtCap)
 	// The pressure patch is half a transverse wavelength long (at least two
 	// cells) and no longer than the hull; its beam is 0.67 of its length, at
 	// least 1.5 cells and no wider than the hull.
-	b.Expr("wakeHalfLamNum", graph.F32, "mul", ref("hullSpeedSq"), math.Pi)
-	b.Expr("wakeHalfLam", graph.F32, "div", ref("wakeHalfLamNum"), ref("wakeGEff"))
-	b.Expr("wakeSrcLen0", graph.F32, "min", ref("hullLength"), ref("wakeHalfLam"))
-	b.Expr("wakeMinSrc", graph.F32, "mul", ref("wakeCell"), 2.0)
-	b.Expr("wakeSrcLength", graph.F32, "max", ref("wakeSrcLen0"), ref("wakeMinSrc"))
-	b.Expr("wakeBeam0", graph.F32, "mul", ref("wakeSrcLength"), 0.67)
-	b.Expr("wakeBeam1", graph.F32, "min", ref("hullBeam"), ref("wakeBeam0"))
-	b.Expr("wakeMinBeam", graph.F32, "mul", ref("wakeCell"), 1.5)
-	b.Expr("wakeSrcBeam", graph.F32, "max", ref("wakeBeam1"), ref("wakeMinBeam"))
+	b.Expr("wakeSrcLength", graph.F32, "max", e("min", ref("hullLength"), e("div", e("mul", speedSq, math.Pi), ref("wakeGEff"))), e("mul", cell, 2.0))
+	b.Expr("wakeSrcBeam", graph.F32, "max", e("min", ref("hullBeam"), e("mul", ref("wakeSrcLength"), 0.67)), e("mul", cell, 1.5))
 	// The surface samples the wake texture at ((xz - camera - wakeCamRel) / wakeCell
 	// + wakeOriginMod) / 256 with wrap addressing, inside the window only.
 	b.ExportParams("wakeCamRelX", "wakeCamRelZ", "wakeOriginModX", "wakeOriginModZ", "wakeCell", "wakeOn")
@@ -292,7 +272,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		// workgroups idle (the kernel returns past its destination size).
 		half := max(w>>1, 1)
 		b.Pass(graph.Pass{Name: pre + tex + ".mips", Type: "repeat", Count: mips - 1, Index: "l", When: when, Body: []graph.Pass{
-			{Name: "mip", Type: "kernel", Kernel: "ocean_mip", Entry: "ocean_mip",
+			{Name: "mip", Kernel: "ocean_mip",
 				Dispatch: b.Workgroups("ocean_mip", "ocean_mip", half*half),
 				Bindings: []graph.Binding{
 					{Name: "src", Resource: tex, LevelAt: &graph.IndexExpr{Index: "l"}},
@@ -319,7 +299,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		pre := fmt.Sprintf("c%d.", c)
 
 		// Spectrum, when a spectrum input changed.
-		sp := graph.Pass{Name: pre + "spectrum", Type: "kernel", Kernel: "ocean_spectrum", Entry: "ocean_spectrum",
+		sp := graph.Pass{Name: pre + "spectrum", Kernel: "ocean_spectrum",
 			When:     graph.Changed(spectrumParams...),
 			Bindings: []graph.Binding{{Name: "h0", Resource: name("h0_", c)}, {Name: "omega", Resource: name("omega_", c)}},
 			Uniforms: []graph.Uniform{b.Uniform("ocean_spectrum", "spec", map[string]any{
@@ -329,7 +309,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		b.Pass(place(sp, "ocean_spectrum", nc, nc))
 
 		// Evolve to the phase time.
-		ev := graph.Pass{Name: pre + "evolve", Type: "kernel", Kernel: "ocean_evolve", Entry: "ocean_evolve",
+		ev := graph.Pass{Name: pre + "evolve", Kernel: "ocean_evolve",
 			Bindings: []graph.Binding{{Name: "h0", Resource: name("h0_", c)}, {Name: "omega", Resource: name("omega_", c)},
 				{Name: "outA", Resource: name("fftA_", c)}, {Name: "outB", Resource: name("fftB_", c)}},
 			Uniforms: []graph.Uniform{b.Uniform("ocean_evolve", "ev", map[string]any{
@@ -342,7 +322,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		if gpu {
 			for _, x := range []string{"A", "B"} {
 				for _, entry := range []string{"fft_rows", "fft_cols"} {
-					b.Pass(graph.Pass{Name: pre + "fft" + x + "." + entry, Type: "kernel", Kernel: fk, Entry: entry,
+					b.Pass(graph.Pass{Name: pre + "fft" + x + "." + entry, Kernel: fk, Entry: notPrimary(entry),
 						Dispatch: &[3]int{nc, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: name("fft"+x+"_", c)}}})
 				}
 			}
@@ -353,7 +333,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 			for axis, label := range []string{"rows", "cols"} {
 				var body []graph.Pass
 				for _, x := range []string{"A", "B"} {
-					body = append(body, place(graph.Pass{Name: x, Type: "kernel", Kernel: gk, Entry: "fft_stage",
+					body = append(body, place(graph.Pass{Name: x, Kernel: gk,
 						Bindings: []graph.Binding{{Name: "src", Resource: name("fft"+x+"_", c)}, {Name: "dst", Resource: name("fft"+x+"2_", c)}},
 						Uniforms: []graph.Uniform{b.Uniform(gk, "fft", map[string]any{"n": nc, "stage": ref("s"), "axis": axis})}}, gk, nc, nc))
 				}
@@ -363,7 +343,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		}
 
 		// Assemble into the cascade textures, then mips.
-		as := graph.Pass{Name: pre + "assemble", Type: "kernel", Kernel: "ocean_assemble", Entry: "ocean_assemble",
+		as := graph.Pass{Name: pre + "assemble", Kernel: "ocean_assemble",
 			Bindings: []graph.Binding{{Name: "fieldA", Resource: name("fftA_", c)}, {Name: "fieldB", Resource: name("fftB_", c)},
 				{Name: "disp", Resource: name("dispTex", c)}, {Name: "slope", Resource: name("slopeTex", c)}},
 			Uniforms: []graph.Uniform{b.Uniform("ocean_assemble", "assem", map[string]any{"n": nc, "lambda": ref("lambda")})}}
@@ -391,7 +371,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		p.When = wakeWhen
 		return place(p, kernel, wakeN, wakeN)
 	}
-	b.Pass(wp(graph.Pass{Name: "wake.source", Type: "kernel", Kernel: "wake_source", Entry: "wake_source",
+	b.Pass(wp(graph.Pass{Name: "wake.source", Kernel: "wake_source",
 		Bindings: []graph.Binding{{Name: "wakeIn", Resource: "wakeA"}, {Name: "fftOut", Resource: "wakeF"}, {Name: "cleanOut", Resource: "wakeC"}},
 		Uniforms: []graph.Uniform{b.Uniform("wake_source", "wake", map[string]any{
 			"width": wakeN, "reset": ref("wakeReset"),
@@ -404,13 +384,13 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 	wakeFFT := func(label, src, dst string) {
 		if gpu {
 			for _, entry := range []string{"fft_rows", "fft_cols"} {
-				b.Pass(graph.Pass{Name: "wake." + label + "." + entry, Type: "kernel", Kernel: wfk, Entry: entry, When: wakeWhen,
+				b.Pass(graph.Pass{Name: "wake." + label + "." + entry, Kernel: wfk, Entry: notPrimary(entry), When: wakeWhen,
 					Dispatch: &[3]int{wakeN, 1, 1}, Bindings: []graph.Binding{{Name: "data", Resource: src}}})
 			}
 			return
 		}
 		for axis, ax := range []string{"rows", "cols"} {
-			body := []graph.Pass{place(graph.Pass{Name: "stage", Type: "kernel", Kernel: wgk, Entry: "fft_stage",
+			body := []graph.Pass{place(graph.Pass{Name: "stage", Kernel: wgk,
 				Bindings: []graph.Binding{{Name: "src", Resource: src}, {Name: "dst", Resource: dst}},
 				Uniforms: []graph.Uniform{b.Uniform(wgk, "fft", map[string]any{"n": wakeN, "stage": ref("s"), "axis": axis})}}, wgk, wakeN, wakeN)}
 			b.Pass(graph.Pass{Name: "wake." + label + "." + ax, Type: "repeat", Count: bitsLen(wakeN), Index: "s", When: wakeWhen,
@@ -418,11 +398,11 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		}
 	}
 	wakeFFT("fft1", "wakeF", "wakeG")
-	b.Pass(wp(graph.Pass{Name: "wake.symbol", Type: "kernel", Kernel: "wake_symbol", Entry: "wake_symbol",
+	b.Pass(wp(graph.Pass{Name: "wake.symbol", Kernel: "wake_symbol",
 		Bindings: []graph.Binding{{Name: "fftIn", Resource: "wakeF"}, {Name: "fftOut", Resource: "wakeG"}},
 		Uniforms: []graph.Uniform{b.Uniform("wake_symbol", "sym", map[string]any{"n": wakeN, "window": ref("wakeLength")})}}, "wake_symbol"))
 	wakeFFT("fft2", "wakeG", "wakeF")
-	b.Pass(wp(graph.Pass{Name: "wake.step", Type: "kernel", Kernel: "wake_step", Entry: "wake_step",
+	b.Pass(wp(graph.Pass{Name: "wake.step", Kernel: "wake_step",
 		Bindings: []graph.Binding{{Name: "qIn", Resource: "wakeG"}, {Name: "cleanIn", Resource: "wakeC"},
 			{Name: "stateOut", Resource: "wakeB"}, {Name: "wakeTex", Resource: "wakeTex"}},
 		Uniforms: []graph.Uniform{b.Uniform("wake_step", "wstep", map[string]any{
@@ -453,17 +433,35 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 	fu["wakeWidth"], fu["wakeGain"], fu["wakeCell"] = wakeN, ref("wakeFoamGainEff"), ref("wakeCell")
 	fu["wakeRelX"], fu["wakeRelZ"] = ref("wakeRelX"), ref("wakeRelZ")
 	fu["wakeOriginX"], fu["wakeOriginZ"] = ref("wakeOriginModX"), ref("wakeOriginModZ")
+	// WebGL2: the foam pass is foamWidth wide and reads each buffer at that
+	// width, so it reads copies made by copy passes (the same elements laid out
+	// foamWidth texels wide). WebGPU reads the buffers directly.
+	foamRead := func(src string, count int) string {
+		if gpu {
+			return src
+		}
+		view := src + "_w"
+		buf(view, "vec4<f32>", count, foamWidth)
+		b.Pass(graph.Pass{Name: "foam.copy." + src, Type: "copy", From: src, To: view, Width: foamWidth})
+		return view
+	}
 	foamBind := []graph.Binding{{Name: "foamIn", Resource: "foamA"}}
 	probeBind := []graph.Binding{}
+	var views [4]string
 	for i := 0; i < 4; i++ {
 		c := min(i, cascades-1) // an unused cascade slot repeats the last real one
 		nc := size(c)
 		fu[fmt.Sprintf("n%d", i)], fu[fmt.Sprintf("size%d", i)] = nc, oceanCascades[c].size
-		foamBind = append(foamBind, graph.Binding{Name: fmt.Sprintf("fieldB%d", i), Resource: name("fftB_", c)})
+		if i < cascades {
+			views[i] = foamRead(name("fftB_", c), nc*nc)
+		} else {
+			views[i] = views[c]
+		}
+		foamBind = append(foamBind, graph.Binding{Name: fmt.Sprintf("fieldB%d", i), Resource: views[i]})
 		probeBind = append(probeBind, graph.Binding{Name: fmt.Sprintf("disp%d", i), Resource: name("fftA_", c)})
 	}
-	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"}, graph.Binding{Name: "wakeIn", Resource: "wakeB"})
-	b.Pass(place(graph.Pass{Name: "foam", Type: "kernel", Kernel: "ocean_foam", Entry: "ocean_foam",
+	foamBind = append(foamBind, graph.Binding{Name: "foamOut", Resource: "foamB"}, graph.Binding{Name: "foamTex", Resource: "foamTex"}, graph.Binding{Name: "wakeIn", Resource: foamRead("wakeB", wakeN*wakeN)})
+	b.Pass(place(graph.Pass{Name: "foam", Kernel: "ocean_foam",
 		Bindings: foamBind, Uniforms: []graph.Uniform{b.Uniform("ocean_foam", "foam", fu)}}, "ocean_foam", foamWidth, foamWidth))
 	mipChain("", "foamTex", foamWidth, foamMips, "")
 	b.Swap("foamA", "foamB").Export("foam", "foamTex")
@@ -481,7 +479,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 		}
 		bind := append([]graph.Binding{{Name: "points", Resource: "probePoints"}}, probeBind...)
 		bind = append(bind, graph.Binding{Name: "out", Resource: "probeOut"})
-		b.Pass(graph.Pass{Name: "probe", Type: "kernel", Kernel: "ocean_probe", Entry: "ocean_probe",
+		b.Pass(graph.Pass{Name: "probe", Kernel: "ocean_probe",
 			Dispatch: b.Workgroups("ocean_probe", "ocean_probe", probeMax), Bindings: bind,
 			Uniforms: []graph.Uniform{b.Uniform("ocean_probe", "probe", pu)}})
 		b.Export("probe", "probeOut")
@@ -491,3 +489,12 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 
 // bitsLen is log2 of a power of two.
 func bitsLen(n int) int { return bits.TrailingZeros(uint(n)) }
+
+// notPrimary leaves out the FFT compute kernel's primary entry (fft_rows), which
+// a pass gets by default; fft_cols is written out.
+func notPrimary(entry string) string {
+	if entry == "fft_rows" {
+		return ""
+	}
+	return entry
+}

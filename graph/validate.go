@@ -35,6 +35,7 @@ func numericType(t string) bool { return t == F32 || t == U32 || t == I32 }
 //     only on WebGPU.
 //  3. WebGL2 passes use only gather kernels, and every written resource is a
 //     render target, at most 32 bytes per pixel in total.
+//     A WebGL2 pass reads a buffer only at its own width (copy passes widen).
 //  4. Dispatch or target sizes cover every element of the written resources.
 //  5. Every uniform field the kernel declares gets a value; every "param:"
 //     reference (uniform, when, resource feed, expression) names a declared
@@ -74,6 +75,9 @@ func (v *validator) run() {
 	}
 	if g.Version != Version {
 		v.errf("version %d, want %d", g.Version, Version)
+	}
+	if g.ParamsFrom != "" {
+		v.errf("paramsFrom %q: resolve the reference (Unshare) before validating", g.ParamsFrom)
 	}
 	v.checkParams()
 	v.checkResources()
@@ -171,22 +175,7 @@ func (v *validator) checkParams() {
 				v.errf("param %q: a frame source is f32", p.Name)
 			}
 		case SourceExpr:
-			want, ok := exprOps[s.Op]
-			if !ok {
-				v.errf("param %q: unknown op %q", p.Name, s.Op)
-			} else if len(s.Args) != want {
-				v.errf("param %q: op %s takes %d args, got %d", p.Name, s.Op, want, len(s.Args))
-			}
-			for _, a := range s.Args {
-				switch x := a.(type) {
-				case string:
-					earlierNumeric(x)
-				default:
-					if _, ok := number(a); !ok {
-						v.errf("param %q: arg %v is not a number or a param reference", p.Name, a)
-					}
-				}
-			}
+			v.checkExpr(p.Name, Expr{Op: s.Op, Args: s.Args}, earlierNumeric)
 			if !numericType(p.Type) {
 				v.errf("param %q: an expression is numeric", p.Name)
 			}
@@ -209,6 +198,39 @@ func (v *validator) checkParams() {
 			v.errf("param %q: unknown source kind %q", p.Name, s.Kind)
 		}
 		v.params[p.Name] = p
+	}
+}
+
+// asExpr reads a nested expression: an Expr, or the map a JSON decode gives.
+func asExpr(a any) (Expr, bool) {
+	switch x := a.(type) {
+	case Expr:
+		return x, true
+	case map[string]any:
+		op, _ := x["op"].(string)
+		args, _ := x["args"].([]any)
+		_, hasOp := x["op"]
+		return Expr{Op: op, Args: args}, hasOp
+	}
+	return Expr{}, false
+}
+
+// checkExpr checks an expression's op, arity and arguments, recursively.
+func (v *validator) checkExpr(param string, e Expr, ref func(string)) {
+	want, ok := exprOps[e.Op]
+	if !ok {
+		v.errf("param %q: unknown op %q", param, e.Op)
+	} else if len(e.Args) != want {
+		v.errf("param %q: op %s takes %d args, got %d", param, e.Op, want, len(e.Args))
+	}
+	for _, a := range e.Args {
+		if s, isStr := a.(string); isStr {
+			ref(s)
+		} else if sub, isExpr := asExpr(a); isExpr {
+			v.checkExpr(param, sub, ref)
+		} else if _, isNum := number(a); !isNum {
+			v.errf("param %q: arg %v is not a number, a param reference or an expression", param, a)
+		}
 	}
 }
 
@@ -279,8 +301,30 @@ func (v *validator) checkWhen(pass, when string) {
 	}
 }
 
+// checkCopy checks a copy pass: WebGL2 only, two buffers of the same element
+// type and count, the destination declared Width texels wide.
+func (v *validator) checkCopy(p Pass) {
+	from, fok := v.res[p.From]
+	to, tok := v.res[p.To]
+	switch {
+	case v.g.Backend != WebGL2:
+		v.errf("pass %q: a copy pass is webgl2 only", p.Name)
+	case !fok || !tok || from.Kind != "buffer" || to.Kind != "buffer":
+		v.errf("pass %q: copy needs two buffer resources, got %q and %q", p.Name, p.From, p.To)
+	case from.ElementType != to.ElementType || from.Count != to.Count:
+		v.errf("pass %q: copy: %q and %q differ in element type or count", p.Name, p.From, p.To)
+	case p.Width <= 0 || to.Width != p.Width:
+		v.errf("pass %q: copy width %d, but %q is %d wide", p.Name, p.Width, p.To, to.Width)
+	case p.From == p.To:
+		v.errf("pass %q: copy from a buffer to itself", p.Name)
+	}
+}
+
 func (v *validator) checkPass(p Pass) {
 	v.checkWhen(p.Name, p.When)
+	if p.Type == "" {
+		p.Type = "kernel"
+	}
 	switch p.Type {
 	case "mipmap":
 		r, ok := v.res[p.Resource]
@@ -291,15 +335,21 @@ func (v *validator) checkPass(p Pass) {
 			v.errf("pass %q: mipmap needs a texture resource, got %q", p.Name, p.Resource)
 		}
 		return
+	case "copy":
+		v.checkCopy(p)
+		return
 	case "kernel":
 	default:
-		v.errf("pass %q: type %q is not kernel or mipmap", p.Name, p.Type)
+		v.errf("pass %q: type %q is not kernel, mipmap, copy or repeat", p.Name, p.Type)
 		return
 	}
 	k, ok := v.kernels[p.Kernel]
 	if !ok {
 		v.errf("pass %q: unknown kernel %q", p.Name, p.Kernel)
 		return
+	}
+	if p.Entry == "" {
+		p.Entry = primaryEntry(k)
 	}
 	var entry *ir.Kernel
 	for i := range k.Module.Kernels {
@@ -313,7 +363,7 @@ func (v *validator) checkPass(p Pass) {
 	}
 	web2 := v.g.Backend == WebGL2
 	if web2 {
-		if !k.Gather || p.Entry != k.Entry {
+		if !k.Gather || p.Entry != primaryEntry(k) {
 			v.errf("pass %q: webgl2 runs gather kernels only; %q entry %q is not one", p.Name, p.Kernel, p.Entry)
 		}
 		if p.Dispatch != nil || p.Target == nil {
@@ -393,6 +443,9 @@ func (v *validator) checkPass(p Pass) {
 		if r.Kind == "texture" && (b.Level < 0 || b.Level >= r.MipLevels) {
 			v.errf("pass %q: binding %q: level %d, resource %q has %d", p.Name, mb.Name, b.Level, r.Name, r.MipLevels)
 			continue
+		}
+		if _, isArr := mb.Type.(ir.Array); isArr && web2 && p.Target != nil && mb.Access == ir.Read && r.Width != p.Target.ElioWidth {
+			v.errf("pass %q: reads buffer %q at width %d, but the pass is %d wide; make a copy of it at that width with a copy pass", p.Name, r.Name, r.Width, p.Target.ElioWidth)
 		}
 		if r.Kind == "buffer" && b.Level != 0 {
 			v.errf("pass %q: binding %q: a buffer has no levels", p.Name, mb.Name)
@@ -610,4 +663,13 @@ func MemoryBytes(g Graph) int64 {
 		}
 	}
 	return total
+}
+
+// primaryEntry is the kernel's primary entry: the named Entry, or the only
+// entry of a one-kernel module.
+func primaryEntry(k Kernel) string {
+	if k.Entry == "" && k.Module != nil && len(k.Module.Kernels) == 1 {
+		return k.Module.Kernels[0].Name
+	}
+	return k.Entry
 }
