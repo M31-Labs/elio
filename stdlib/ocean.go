@@ -108,6 +108,18 @@ func WakeSource() (*ir.Module, error) {
 	return parseOcean("ocean/wake_source.elio", WakeSourceSource, false)
 }
 
+// WakeSymbolSource is the .elio source of wake_symbol: it multiplies an FFT
+// spectrum by the deep-water operator |k| (the wake's exact dispersion). The
+// header derives the three-pass use. It is gather-compatible (one vec4 output).
+//
+//go:embed ocean/wake_symbol.elio
+var WakeSymbolSource string
+
+// WakeSymbol builds the wake_symbol module from WakeSymbolSource.
+func WakeSymbol() (*ir.Module, error) {
+	return parseOcean("ocean/wake_symbol.elio", WakeSymbolSource, false)
+}
+
 // OceanRng builds the ocean_rng module from OceanRngSource.
 func OceanRng() (*ir.Module, error) {
 	return parseOcean("ocean/rng.elio", OceanRngSource, true)
