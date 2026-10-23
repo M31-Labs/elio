@@ -22,6 +22,7 @@ type wakeSourceParams struct {
 	srcLength, srcBeam   float64
 	fullSpeed, foamSpeed float64
 	diffuse, jitter      float64
+	bowGain, bowFoam     float64
 }
 
 func (p wakeSourceParams) uniform() map[string]any {
@@ -31,7 +32,7 @@ func (p wakeSourceParams) uniform() map[string]any {
 		"cell": p.cell, "dt": p.dt, "tau": p.tau, "depth": p.depth,
 		"hullU": p.hullU, "hullV": p.hullV, "heading": p.heading, "speed": p.speed,
 		"hullLen": p.length, "hullBeam": p.beam, "srcLength": p.srcLength, "srcBeam": p.srcBeam,
-		"fullSpeed": p.fullSpeed, "foamSpeed": p.foamSpeed, "diffuse": p.diffuse, "jitter": p.jitter,
+		"fullSpeed": p.fullSpeed, "foamSpeed": p.foamSpeed, "diffuse": p.diffuse, "jitter": p.jitter, "bowGain": p.bowGain, "bowFoam": p.bowFoam, "_pad4": 0.0, "_pad5": 0.0,
 	}
 }
 
@@ -45,6 +46,12 @@ func wakeFootprint(along, across, a, b float64) float64 {
 		return 0
 	}
 	return (1 - q) * (1 - q)
+}
+
+// bowMound is the height (m) of the bow patch's negative pressure at (along, across).
+func bowMound(p wakeSourceParams, along, across float64) float64 {
+	bowLen, bowBeam := math.Max(0.18*p.length, 2*p.cell), math.Max(0.6*p.beam, 1.5*p.cell)
+	return p.bowGain * p.speed * p.speed / 19.62 * wakeFootprint(along-p.length/2+bowLen/2, across, bowLen/2, bowBeam/2)
 }
 
 // wakeHash is the kernel's float hash of a world cell, indices reduced mod 289.
@@ -67,7 +74,7 @@ func wakeSourceRef(p wakeSourceParams, ru, rv int, state [4]float64, cleared boo
 	along, across := px*fx+pz*fz, px*fz-pz*fx
 	fade := sat(p.speed / p.fullSpeed)
 	bowShift := math.Max(p.length/2-p.srcLength/2, 0)
-	s = h + p.depth*fade*fade*wakeFootprint(along-bowShift, across, p.srcLength/2, p.srcBeam/2)
+	s = h + p.depth*fade*fade*wakeFootprint(along-bowShift, across, p.srcLength/2, p.srcBeam/2) - bowMound(p, along, across)
 	uh, vh := along/(p.length/2), across/(p.beam/2)
 	inj := 0.4 * wakeFootprint(uh, vh, 1, 1)
 	{
@@ -81,7 +88,7 @@ func wakeSourceRef(p wakeSourceParams, ru, rv int, state [4]float64, cleared boo
 			inj += 0.3 * (1 - qx) * (1 - qx)
 		}
 	}
-	inj += 0.35 * wakeFootprint(uh-0.85, vh, 0.25, 0.45)
+	inj += p.bowFoam * smoothstep01(4.5, 9, p.speed) * wakeFootprint(uh-0.8, vh, 0.35, 1)
 	inj = math.Min(inj*sat(p.speed/p.foamSpeed), 1)
 	w := p.width
 	ka := math.Min(p.diffuse*p.dt/(p.cell*p.cell), 0.2)
@@ -124,7 +131,7 @@ func runWakeSource(t *testing.T, p wakeSourceParams, state [][4]float64, opts ru
 
 func wakeTestParams() wakeSourceParams {
 	return wakeSourceParams{width: 32, cell: 4, dt: 0.1, tau: 30, depth: 0.5,
-		hullU: 60, hullV: 70, heading: 0.6, speed: 8, length: 40, beam: 12, srcLength: 24, srcBeam: 10, fullSpeed: 4, foamSpeed: 5, diffuse: 1.5, jitter: 1.2}
+		hullU: 60, hullV: 70, heading: 0.6, speed: 8, length: 40, beam: 12, srcLength: 24, srcBeam: 10, fullSpeed: 4, foamSpeed: 5, diffuse: 1.5, jitter: 1.2, bowGain: 0.2, bowFoam: 0.9}
 }
 
 func TestWakeSourceFootprintAndFoam(t *testing.T) {
@@ -258,6 +265,7 @@ func TestWakeSourcePressureStartsAtTheBow(t *testing.T) {
 	p := wakeTestParams()
 	p.width, p.cell, p.hullU, p.hullV, p.heading = 64, 2, 64, 64, 0
 	p.length, p.srcLength, p.beam, p.srcBeam = 60, 20, 12, 8
+	p.bowGain = 0 // the pressure patch alone; the bow mound has its own test
 	fftIn, _ := runWakeSource(t, p, make([][4]float64, p.width*p.width), run.Options{})
 	lo, hi := extentAlong(p, fftIn, 0, 1e-6)
 	if hi > p.length/2+p.cell || hi < p.length/2-2*p.cell {
@@ -273,6 +281,7 @@ func TestWakeSourceSternWashAndStreakAngle(t *testing.T) {
 	p := wakeTestParams()
 	p.width, p.cell, p.hullU, p.hullV, p.heading = 64, 2, 64, 64, 0.6+math.Pi
 	p.length, p.beam, p.speed, p.diffuse, p.jitter = 60, 12, 8, 0, 0
+	p.bowFoam = 0 // the stern wash alone
 	_, clean := runWakeSource(t, p, make([][4]float64, p.width*p.width), run.Options{})
 	fx, fz := math.Sin(p.heading), math.Cos(p.heading)
 	var wideLo, wideHi = math.Inf(1), math.Inf(-1)
@@ -331,5 +340,49 @@ func TestWakeSourceDiffusionAndJitter(t *testing.T) {
 	}
 	if hi-lo < 0.05*(1-math.Exp(-p.dt*3/p.tau)) {
 		t.Errorf("with jitter the cells still fade alike: %g..%g", lo, hi)
+	}
+}
+
+// The bow wave: a mound of raised water at the stem whose height grows with the square of the speed (faint at 8 kn, about a metre at 22 kn),
+// with its forward edge at the bow, and white water at the stem that is absent at 8 kn and strong from 18 kn.
+func TestWakeSourceBowWave(t *testing.T) {
+	const knot = 0.514444
+	base := wakeTestParams()
+	base.width, base.cell, base.hullU, base.hullV, base.heading = 64, 2, 64, 64, 0
+	base.length, base.beam, base.depth, base.srcLength, base.srcBeam = 120, 20, 0, 10, 6 // no Kelvin patch: only the bow terms
+	mound := func(kn float64) (peak, ahead float64, foam float64) {
+		p := base
+		p.speed = kn * knot
+		fftIn, clean := runWakeSource(t, p, make([][4]float64, p.width*p.width), run.Options{})
+		for i, v := range fftIn {
+			if -v[0] > peak {
+				peak = -v[0]
+			}
+			pz := (float64(i/p.width)+0.5)*p.cell - p.hullV // heading 0: forward is +z
+			if -v[0] > 1e-6 {
+				ahead = math.Max(ahead, pz)
+			}
+			// white water at the stem: turbulence within a beam of the bow
+			if px := (float64(i%p.width)+0.5)*p.cell - p.hullU; math.Abs(px) < p.beam && pz > p.length/2-0.3*p.length && pz < p.length/2+p.cell {
+				foam = math.Max(foam, clean[i][2])
+			}
+		}
+		return
+	}
+	p8, _, f8 := mound(8)
+	p15, a15, f15 := mound(15)
+	p22, a22, f22 := mound(22)
+	t.Logf("bow mound %.2f m at 8 kn, %.2f m at 15 kn, %.2f m at 22 kn; bow foam %.2f, %.2f, %.2f", p8, p15, p22, f8, f15, f22)
+	if p8 > 0.2 || p15 < 0.4 || p15 > 0.9 || p22 < 0.9 || p22 > 1.6 {
+		t.Errorf("bow mound heights %.2f, %.2f, %.2f m at 8, 15 and 22 kn want about 0.17, 0.6 and 1.3", p8, p15, p22)
+	}
+	if math.Abs(p22/p15-math.Pow(22./15, 2)) > 0.25 {
+		t.Errorf("the mound should grow with the speed squared: %.2f / %.2f", p22, p15)
+	}
+	if a22 > base.length/2+base.cell || a22 < base.length/2-2*base.cell || a15 > base.length/2+base.cell {
+		t.Errorf("the mound reaches %.1f / %.1f m ahead of the hull centre, want its forward edge at the bow (%.0f m)", a22, a15, base.length/2)
+	}
+	if f8 > 0.3 || f15 < 0.4 || f22 < 0.7 {
+		t.Errorf("bow foam %.2f, %.2f, %.2f at 8, 15, 22 kn want faint (hull aeration only), strong, full", f8, f15, f22)
 	}
 }

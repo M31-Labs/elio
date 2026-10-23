@@ -39,6 +39,8 @@
 //     rest forces nothing and the wake amplitude grows with speed squared. The
 //     patch sits at the bow: its forward edge is at the hull's bow, so the
 //     Kelvin pattern and the foam start together;
+//   bow wave: a second, negative patch at the stem (see the code) that raises
+//     a mound of bowGain v^2 / 2g metres in front of the hull;
 //   foam (turbulence) from three sources, all scaled by
 //     saturate(speed / foamSpeed) and combined by sum, capped at 1:
 //       aeration 0.4 w along the whole hull footprint (hullLen, hullBeam): the
@@ -48,8 +50,9 @@
 //         0.4 (in u) and 0.6 beam: a churned band one beam wide that the hull
 //         leaves behind it, plus a faint shoulder 0.3 (1 - 0.4 q)^2 about 1.6
 //         times as wide, so the band's edge fades over several cells;
-//       bow spray 0.35 w, centred at u = 0.85 with semi axes 0.25 (in u) and
-//         0.45 beam/2.
+//       bow wash bowFoam w smoothstep(4.5, 9, speed), centred at u = 0.8 with
+//         semi axes 0.35 (in u) and beam/2: white water at the stem that
+//         rolls away along both sides (faint at 8 kn, full from 18 kn).
 // Turbulence T lives in the water frame and trails the hull. Per step
 //   T' = max(T_d exp(-dt k_c / tau), injection)
 //   T_d = T + a (T_left + T_right + T_up + T_down - 4 T),  a = min(diffuse dt / cell^2, 0.2)
@@ -85,6 +88,10 @@ struct WakeSourceParams {
   foamSpeed: f32;
   diffuse: f32;
   jitter: f32;
+  bowGain: f32;
+  bowFoam: f32;
+  _pad4: f32;
+  _pad5: f32;
 }
 
 @group(0) @binding(0) uniform wake: WakeSourceParams;
@@ -135,7 +142,21 @@ struct WakeSourceParams {
     head = wake.depth * fade * fade * (1.0 - qs) * (1.0 - qs);
   }
 
-  // Turbulence injection: aeration along the hull, the stern wash, the bow spray.
+  // Bow wave: a mound at the stem from a patch of negative pressure (the surface
+  // s = h + e that the operator acts on is lowered there, so the water rises to
+  // h = -e), whose head is bowGain v^2 / 2g: the stagnation head of the speed.
+  // The patch is 0.18 hull lengths long and 0.6 beam wide (at least two and one
+  // and a half cells), its forward edge at the stem. A hull at rest raises nothing.
+  let bowLen = max(0.18 * wake.hullLen, 2.0 * wake.cell);
+  let bowBeam = max(0.6 * wake.hullBeam, 1.5 * wake.cell);
+  let ba = (along - 0.5 * wake.hullLen + 0.5 * bowLen) / (0.5 * bowLen);
+  let bb = across / (0.5 * bowBeam);
+  let qbw = ba * ba + bb * bb;
+  if qbw < 1.0 {
+    head = head - wake.bowGain * wake.speed * wake.speed / 19.62 * (1.0 - qbw) * (1.0 - qbw);
+  }
+
+  // Turbulence injection: aeration along the hull, the stern wash, the bow wash.
   let uh = along / (0.5 * wake.hullLen);
   let vh = across / (0.5 * wake.hullBeam);
   let qh = uh * uh + vh * vh;
@@ -153,11 +174,14 @@ struct WakeSourceParams {
   if qx < 1.0 {
     inj = inj + 0.3 * (1.0 - qx) * (1.0 - qx);
   }
-  let bu = (uh - 0.85) / 0.25;
-  let bv = vh / 0.45;
+  // Bow wash: white water at the stem that rolls away along both sides, an
+  // ellipse centred at u = 0.8 with semi axes 0.35 (in u) and one beam/2 across.
+  // It grows with speed from nothing at 4.5 m/s (9 kn) to full at 9 m/s (18 kn).
+  let bu = (uh - 0.8) / 0.35;
+  let bv = vh / 1.0;
   let qb = bu * bu + bv * bv;
   if qb < 1.0 {
-    inj = inj + 0.35 * (1.0 - qb) * (1.0 - qb);
+    inj = inj + wake.bowFoam * smoothstep(4.5, 9.0, wake.speed) * (1.0 - qb) * (1.0 - qb);
   }
   inj = min(inj * clamp(wake.speed / wake.foamSpeed, 0.0, 1.0), 1.0);
 

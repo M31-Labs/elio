@@ -203,6 +203,7 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 	b.Value("wakeAlpha", graph.F32, 0.02).Value("wakeMinLambdaCells", graph.F32, 8)
 	b.Value("wakeFoamGain", graph.F32, 1).Value("wakeFoamTau", graph.F32, 48)
 	b.Value("wakeDiffuse", graph.F32, 1.5).Value("wakeJitter", graph.F32, 1.0)
+	b.Value("wakeBowGain", graph.F32, 0.2).Value("wakeBowFoam", graph.F32, 0.9)
 	b.Expr("wakeOn", graph.F32, "mul", ref("wakeEnabled"), 1.0)
 	b.Expr("wakeFoamGainEff", graph.F32, "mul", ref("wakeEnabled"), ref("wakeFoamGain"))
 	b.Delta("wakeEdge", graph.I32, "wakeEnabled")
@@ -381,7 +382,8 @@ func buildOcean(backend, tier string, n, cascades int, ks []graph.Kernel, hullNo
 			"hullU": ref("wakeHullU"), "hullV": ref("wakeHullV"), "heading": ref("hullHeading"), "speed": ref("hullSpeed"),
 			"hullLen": ref("hullLength"), "hullBeam": ref("hullBeam"), "srcLength": ref("wakeSrcLength"), "srcBeam": ref("wakeSrcBeam"),
 			"fullSpeed": wakeFullSpeed, "foamSpeed": wakeFoamSpeed,
-			"diffuse": ref("wakeDiffuse"), "jitter": ref("wakeJitter")})}}, "wake_source"))
+			"diffuse": ref("wakeDiffuse"), "jitter": ref("wakeJitter"),
+			"bowGain": ref("wakeBowGain"), "bowFoam": ref("wakeBowFoam")})}}, "wake_source"))
 	wfk, wgk := fmt.Sprintf("fft_compute_%d", wakeN), fmt.Sprintf("fft_gather_%d", wakeN)
 	wakeFFT := func(label, src, dst string) {
 		if gpu {
