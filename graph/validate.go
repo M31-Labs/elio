@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"m31labs.dev/elio/ir"
@@ -37,7 +38,9 @@ func numericType(t string) bool { return t == F32 || t == U32 || t == I32 }
 //  4. Dispatch or target sizes cover every element of the written resources.
 //  5. Every uniform field the kernel declares gets a value; every "param:"
 //     reference (uniform, when, resource feed, expression) names a declared
-//     param of a matching type; a param refers only to earlier params.
+//     param of a matching type; a param refers only to earlier params. A bool
+//     param reads as 1 or 0 in an expression, delta or accumulate. A node
+//     source names a scene node id and a pose field (x, z, heading, speed).
 //  6. Every export names a texture resource (on WebGPU, a buffer too, for
 //     readback); every exportParams entry names a numeric param.
 func Validate(g Graph, kernels []Kernel) error {
@@ -154,8 +157,8 @@ func (v *validator) checkParams() {
 			q, ok := v.params[n]
 			if !ok {
 				v.errf("param %q: refers to %q, which is not an earlier param", p.Name, n)
-			} else if !numericType(q.Type) {
-				v.errf("param %q: %q is not numeric", p.Name, n)
+			} else if !numericType(q.Type) && q.Type != Bool {
+				v.errf("param %q: %q is not numeric or bool", p.Name, n)
 			}
 		}
 		switch s.Kind {
@@ -186,6 +189,16 @@ func (v *validator) checkParams() {
 			}
 			if !numericType(p.Type) {
 				v.errf("param %q: an expression is numeric", p.Name)
+			}
+		case SourceNode:
+			if s.Node == "" {
+				v.errf("param %q: a node source needs a node id", p.Name)
+			}
+			if !slices.Contains(NodeFields, s.Field) {
+				v.errf("param %q: node field %q is not one of %v", p.Name, s.Field, NodeFields)
+			}
+			if p.Type != F32 {
+				v.errf("param %q: a node source is f32", p.Name)
 			}
 		case SourceAccumulate, SourceDelta:
 			earlierNumeric(s.Of)

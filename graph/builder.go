@@ -81,6 +81,13 @@ func (b *Builder) Frame(name, source string) *Builder {
 	return b
 }
 
+// Node declares an f32 param the runner reads from a scene node's pose each
+// frame: field is "x", "z", "heading" or "speed" (see Source.Node).
+func (b *Builder) Node(name, node, field string) *Builder {
+	b.g.Params = append(b.g.Params, Param{Name: name, Type: F32, Source: Source{Kind: SourceNode, Node: node, Field: field}})
+	return b
+}
+
 // Expr declares a param computed each frame by op (add, sub, mul, div, mod,
 // min, max over two args; floor over one) from earlier params (Ref) or
 // numbers.
