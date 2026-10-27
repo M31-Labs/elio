@@ -252,3 +252,58 @@ func TestDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func texModule(format string, body ...ir.Stmt) *ir.Module {
+	return &ir.Module{
+		Bindings: []ir.Binding{
+			{Group: 0, Binding: 2, Space: ir.Storage, Access: ir.Write, Name: "disp", Type: ir.StorageTexture{Format: format}},
+		},
+		Kernels: []ir.Kernel{{
+			Name: "main", WorkgroupSize: [3]int{16, 1, 1},
+			Builtins: []ir.Builtin{{Name: "gid", Builtin: "global_invocation_id", Type: ir.Vec{N: 3, Elem: ir.U32}}},
+			Body:     body,
+		}},
+	}
+}
+
+func TestStorageTexture(t *testing.T) {
+	store := ir.Do{Expr: ir.Call{Func: "textureStore", Args: []ir.Expr{
+		ir.Name{Name: "disp"},
+		ir.Call{Func: "vec2u", Args: []ir.Expr{ir.Lit{Text: "1u"}, ir.Lit{Text: "2u"}}},
+		ir.Call{Func: "vec4", Args: []ir.Expr{ir.Lit{Text: "1.0"}, ir.Lit{Text: "0.0"}, ir.Lit{Text: "0.0"}, ir.Lit{Text: "1.0"}}},
+	}}}
+	if errs := Check(texModule("rgba16float", store)); len(errs) != 0 {
+		t.Fatalf("valid texture module rejected:\n%v", Errors(errs))
+	}
+	dims := ir.Let{Name: "d", Value: ir.Call{Func: "textureDimensions", Args: []ir.Expr{ir.Name{Name: "disp"}}}}
+	if errs := Check(texModule("r32float", dims)); len(errs) != 0 {
+		t.Fatalf("textureDimensions rejected:\n%v", Errors(errs))
+	}
+
+	cases := []struct {
+		name string
+		mod  *ir.Module
+		want string
+	}{
+		{"assign", texModule("rgba16float", ir.Assign{Target: ir.Name{Name: "disp"}, Value: ir.Lit{Text: "1"}}), `cannot assign to "disp"`},
+		{"address", texModule("rgba16float", ir.Let{Name: "p", Value: ir.AddrOf{E: ir.Name{Name: "disp"}}}), `cannot take the address of "disp"`},
+		{"bad format", texModule("rgba8unorm"), `unknown storage texture format "rgba8unorm"`},
+		{"write on array", &ir.Module{Bindings: []ir.Binding{
+			{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.Write, Name: "buf", Type: ir.Array{Elem: ir.F32}},
+		}}, "write access needs a storage texture"},
+		{"texture without write", &ir.Module{Bindings: []ir.Binding{
+			{Group: 0, Binding: 0, Space: ir.Storage, Access: ir.Read, Name: "tx", Type: ir.StorageTexture{Format: "r32float"}},
+		}}, "storage texture needs write access"},
+		{"arity", texModule("rgba16float", ir.Do{Expr: ir.Call{Func: "textureStore", Args: []ir.Expr{
+			ir.Name{Name: "disp"}, ir.Lit{Text: "1u"},
+		}}}), "textureStore expects 3 argument(s), got 2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Errors(Check(tc.mod))
+			if got == nil || !strings.Contains(got.Error(), tc.want) {
+				t.Fatalf("want diagnostic %q, got %v", tc.want, got)
+			}
+		})
+	}
+}

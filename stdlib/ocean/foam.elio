@@ -1,0 +1,304 @@
+// foam.elio — ocean_foam: persistent crest foam on a toroidal grid. One
+// invocation per texel of a width x width state (1024 in production, 0.5 m per
+// texel, so 512 m around the camera). Gather-compatible: it writes foamOut[i]
+// (an f32 buffer, 16 bytes counted) and one RGBA16F storage texture (8 bytes),
+// 24 bytes per pixel; it reads foamIn, a different buffer. The host swaps
+// foamIn and foamOut each frame.
+//
+// Toroidal layout. A world cell (wx, wz) (integer, cell size `cell` metres, so its
+// centre is ((wx + 0.5) cell, (wz + 0.5) cell)) always lives at buffer texel
+// (wx mod width, wz mod width). The window is the width x width block of cells
+// from the origin (originX, originZ), the world cell index of the window's first
+// cell AFTER this frame's move. When the camera crosses a texel boundary the
+// host moves the origin by whole cells and passes the move (shiftX, shiftZ), so
+// the previous origin was (originX - shiftX, originZ - shiftZ). Cells that stay in
+// the window keep their buffer slot, so their position relative to the origin
+// moves by (-shiftX, -shiftZ). The cells that enter (the last shiftX columns when
+// shiftX > 0, the first -shiftX when shiftX < 0, likewise for z; everything when
+// |shift| >= width) reuse the slots of cells that left, so their foam is cleared.
+// The window origin in metres, originX cell, is wrapped per cascade by the host
+// into omX0..3 / omZ0..3 = mod(originX cell, size_c) (floored, in float64); the
+// kernel samples cascade c at om_c + (u + 0.5) cell for window column u, wrapping
+// into the tile. Unused cascade slots may hold anything finite.
+// Both outputs use this toroidal layout: sample with the world cell modulo width
+// and wrap addressing; no origin is needed in the shader.
+//
+// Foam per texel: f = decay * foamIn (cleared to 0 if the cell entered), then
+//   f = min(f + saturate((threshold - J) * gain), 1),   decay = exp(-dt / tau)
+// where J is the Jacobian of the horizontal displacement at the cell centre,
+// formed from sums over cascades (a per-cascade Jacobian cannot be combined):
+//   J = (1 + lambda S_xx)(1 + lambda S_zz) - (lambda S_xz)^2
+//   S_xx, S_zz, S_xz = sums over cascades of dDx/dx, dDz/dz, dDx/dz
+// The texture holds (f, J, wf, 1); wf is the wake foam coverage, 0 without a wake.
+//
+// Ship wake. With wakeWidth > 0 and wakeGain > 0 the texture's wake lane wf is the
+// wake foam: the wake window's turbulence T (the z lane of wakeIn, a wakeWidth^2
+// vec4 buffer in the toroidal layout of wake_source), bilinear at the foam cell
+// centre in wake cells (cell size wakeCell metres) and 0 outside the wake window,
+// modulated by streaky noise (see the code). wf is separate from f: the foam
+// state f holds crest foam only, so the wake's foam follows the churned water
+// instead of lingering. The wake window's turbulence persists for its own
+// time constant, so the trail outlives the crest foam's tau. Positions use
+// small numbers only: wakeRelX/Z is the foam window origin in metres from the
+// wake window's origin corner (evaluated in float64 by the host), and
+// wakeOriginX/Z the wake window origin cell wrapped to [0, wakeWidth).
+//
+// Host layout of the cascade inputs. fieldB0..fieldB3 are the cascades' B buffers
+// as the inverse FFT leaves them: n_c * n_c vec4, natural order (index z * n + x,
+// texel (x, z) at tile offset (x, z) * size_c / n_c, the tile repeating), with
+// contents (dDy/dz, dDx/dx, dDz/dz, dDx/dz) NOT yet scaled by choppiness; this
+// kernel applies lambda. Only the y, z and w lanes are read. `cascades` (at most 4)
+// says how many are used; unused bindings may hold any buffer. They are sampled
+// bilinearly at the world position of each cell, so no per-cascade resampling is
+// needed. (Each fieldB_c is the second inverse FFT output of ocean_evolve; with
+// foamIn, foamOut that makes six storage bindings.)
+
+struct OceanFoamParams {
+  width: u32;
+  cascades: u32;
+  _pad0: u32;
+  _pad1: u32;
+  originX: i32;
+  originZ: i32;
+  shiftX: i32;
+  shiftZ: i32;
+  dt: f32;
+  tau: f32;
+  threshold: f32;
+  gain: f32;
+  lambda: f32;
+  cell: f32;
+  _pad2: f32;
+  _pad3: f32;
+  n0: u32;
+  n1: u32;
+  n2: u32;
+  n3: u32;
+  size0: f32;
+  size1: f32;
+  size2: f32;
+  size3: f32;
+  omX0: f32;
+  omX1: f32;
+  omX2: f32;
+  omX3: f32;
+  omZ0: f32;
+  omZ1: f32;
+  omZ2: f32;
+  omZ3: f32;
+  wakeWidth: u32;
+  wakeGain: f32;
+  wakeCell: f32;
+  _pad4: f32;
+  wakeRelX: f32;
+  wakeRelZ: f32;
+  wakeOriginX: i32;
+  wakeOriginZ: i32;
+}
+
+@group(0) @binding(0) uniform foam: OceanFoamParams;
+@group(0) @binding(1) storage read foamIn: []f32;
+@group(0) @binding(2) storage read fieldB0: []vec4;
+@group(0) @binding(3) storage read fieldB1: []vec4;
+@group(0) @binding(4) storage read fieldB2: []vec4;
+@group(0) @binding(5) storage read fieldB3: []vec4;
+@group(0) @binding(6) storage read_write foamOut: []f32;
+@group(0) @binding(7) storage write foamTex: tex2d_rgba16float;
+@group(0) @binding(8) storage read wakeIn: []vec4;
+
+@workgroup(64) kernel ocean_foam(gid: global_invocation_id) {
+  let i = gid.x;
+  let w = foam.width;
+  if i >= w * w { return; }
+  let wi = i32(w);
+  // Position of this buffer texel relative to the window origin, 0..width-1.
+  let ru = ((i32(i % w) - foam.originX) % wi + wi) % wi;
+  let rv = ((i32(i / w) - foam.originZ) % wi + wi) % wi;
+
+  // Did this cell wrap in this frame?
+  var entered = false;
+  if foam.shiftX > 0 {
+    if ru >= wi - foam.shiftX { entered = true; }
+  }
+  if foam.shiftX < 0 {
+    if ru < 0 - foam.shiftX { entered = true; }
+  }
+  if foam.shiftZ > 0 {
+    if rv >= wi - foam.shiftZ { entered = true; }
+  }
+  if foam.shiftZ < 0 {
+    if rv < 0 - foam.shiftZ { entered = true; }
+  }
+
+  // Jacobian terms summed over cascades at the cell centre. The position in
+  // cascade c is omX_c + (ru + 0.5) cell: the window origin wrapped into the
+  // tile (by the host, in float64) plus the local offset, so this kernel never
+  // forms a large world coordinate in f32.
+  var sxx = 0.0;
+  var szz = 0.0;
+  var sxz = 0.0;
+  for (var c: u32 = 0u; c < foam.cascades; c = c + 1u) {
+    var nc = foam.n0;
+    var lc = foam.size0;
+    var ox = foam.omX0;
+    var oz = foam.omZ0;
+    if c == 1u {
+      nc = foam.n1;
+      lc = foam.size1;
+      ox = foam.omX1;
+      oz = foam.omZ1;
+    }
+    if c == 2u {
+      nc = foam.n2;
+      lc = foam.size2;
+      ox = foam.omX2;
+      oz = foam.omZ2;
+    }
+    if c == 3u {
+      nc = foam.n3;
+      lc = foam.size3;
+      ox = foam.omX3;
+      oz = foam.omZ3;
+    }
+    let u = (ox + (f32(ru) + 0.5) * foam.cell) / lc;
+    let v = (oz + (f32(rv) + 0.5) * foam.cell) / lc;
+    let fxs = (u - floor(u)) * f32(nc);
+    let fzs = (v - floor(v)) * f32(nc);
+    let fxf = floor(fxs);
+    let fzf = floor(fzs);
+    let x0 = min(u32(fxf), nc - 1u);
+    let z0 = min(u32(fzf), nc - 1u);
+    let rx = fxs - fxf;
+    let rz = fzs - fzf;
+    let x1 = (x0 + 1u) % nc;
+    let z1 = (z0 + 1u) % nc;
+    var v00 = vec4(0.0, 0.0, 0.0, 0.0);
+    var v10 = vec4(0.0, 0.0, 0.0, 0.0);
+    var v01 = vec4(0.0, 0.0, 0.0, 0.0);
+    var v11 = vec4(0.0, 0.0, 0.0, 0.0);
+    if c == 0u {
+      v00 = fieldB0[z0 * nc + x0];
+      v10 = fieldB0[z0 * nc + x1];
+      v01 = fieldB0[z1 * nc + x0];
+      v11 = fieldB0[z1 * nc + x1];
+    }
+    if c == 1u {
+      v00 = fieldB1[z0 * nc + x0];
+      v10 = fieldB1[z0 * nc + x1];
+      v01 = fieldB1[z1 * nc + x0];
+      v11 = fieldB1[z1 * nc + x1];
+    }
+    if c == 2u {
+      v00 = fieldB2[z0 * nc + x0];
+      v10 = fieldB2[z0 * nc + x1];
+      v01 = fieldB2[z1 * nc + x0];
+      v11 = fieldB2[z1 * nc + x1];
+    }
+    if c == 3u {
+      v00 = fieldB3[z0 * nc + x0];
+      v10 = fieldB3[z0 * nc + x1];
+      v01 = fieldB3[z1 * nc + x0];
+      v11 = fieldB3[z1 * nc + x1];
+    }
+    let bil = (1.0 - rz) * ((1.0 - rx) * v00 + rx * v10) + rz * ((1.0 - rx) * v01 + rx * v11);
+    sxx = sxx + bil.y;
+    szz = szz + bil.z;
+    sxz = sxz + bil.w;
+  }
+  let jac = (1.0 + foam.lambda * sxx) * (1.0 + foam.lambda * szz) - foam.lambda * sxz * foam.lambda * sxz;
+
+  var f = foamIn[i] * exp(0.0 - foam.dt / foam.tau);
+  if entered { f = 0.0; }
+  f = min(f + clamp((foam.threshold - jac) * foam.gain, 0.0, 1.0), 1.0);
+
+  // Ship wake: foam follows the wake's turbulence (the z lane of wakeIn) where it
+  // beats a streaky noise threshold; wf is that coverage, 0..1.
+  var wf = 0.0;
+  if foam.wakeWidth > 0u {
+    if foam.wakeGain > 0.0 {
+      let ww = i32(foam.wakeWidth);
+      let px = (foam.wakeRelX + (f32(ru) + 0.5) * foam.cell) / foam.wakeCell - 0.5;
+      let pz = (foam.wakeRelZ + (f32(rv) + 0.5) * foam.cell) / foam.wakeCell - 0.5;
+      let x0 = floor(px);
+      let z0 = floor(pz);
+      let fx = px - x0;
+      let fz = pz - z0;
+      var turb = 0.0;
+      var theta = 0.0;
+      for (var c: u32 = 0u; c < 4u; c = c + 1u) {
+        var cu = i32(x0);
+        var cv = i32(z0);
+        var wgt = (1.0 - fx) * (1.0 - fz);
+        if c == 1u { cu = cu + 1; wgt = fx * (1.0 - fz); }
+        if c == 2u { cv = cv + 1; wgt = (1.0 - fx) * fz; }
+        if c == 3u { cu = cu + 1; cv = cv + 1; wgt = fx * fz; }
+        if cu >= 0 {
+          if cu < ww {
+            if cv >= 0 {
+              if cv < ww {
+                let bu = (cu + foam.wakeOriginX) % ww;
+                let bv = (cv + foam.wakeOriginZ) % ww;
+                let wc = wakeIn[u32(bv * ww + bu)];
+                turb = turb + wgt * wc.z;
+                // The streak angle of the nearest wake cell (angles do not blend).
+                if wgt >= 0.25 {
+                  theta = wc.w;
+                }
+              }
+            }
+          }
+        }
+      }
+      // Noise in the water frame, stretched along the streak angle: long streaks
+      // (16 m by 1.6 m), patches (6 m by 3.5 m) and fine grain (1.4 m), value noise
+      // on a lattice hashed with fract(sin()). World metres come from the integer
+      // cell index, so the pattern holds still while the window moves.
+      let fwx = sin(theta);
+      let fwz = cos(theta);
+      let gx = (f32(foam.originX + i32(ru)) + 0.5) * foam.cell;
+      let gz = (f32(foam.originZ + i32(rv)) + 0.5) * foam.cell;
+      let ga = gx * fwx + gz * fwz;
+      let gb = gx * fwz - gz * fwx;
+      var nsum = 0.0;
+      for (var o: u32 = 0u; o < 3u; o = o + 1u) {
+        var sa = 16.0;
+        var sb = 1.6;
+        var amp = 0.35;
+        if o == 1u {
+          sa = 6.0;
+          sb = 3.5;
+          amp = 0.4;
+        }
+        if o == 2u {
+          sa = 1.4;
+          sb = 1.4;
+          amp = 0.25;
+        }
+        let qa = ga / sa;
+        let qb = gb / sb;
+        let ia = floor(qa);
+        let ib = floor(qb);
+        let ta = qa - ia;
+        let tb = qb - ib;
+        let ea = ta * ta * (3.0 - 2.0 * ta);
+        let eb = tb * tb * (3.0 - 2.0 * tb);
+        let ma = ia - 289.0 * floor(ia / 289.0);
+        let mb = ib - 289.0 * floor(ib / 289.0);
+        let ph = 37.719 * f32(o);
+        let h00 = fract(sin(12.9898 * ma + 78.233 * mb + ph) * 43758.5453);
+        let h10 = fract(sin(12.9898 * (ma + 1.0) + 78.233 * mb + ph) * 43758.5453);
+        let h01 = fract(sin(12.9898 * ma + 78.233 * (mb + 1.0) + ph) * 43758.5453);
+        let h11 = fract(sin(12.9898 * (ma + 1.0) + 78.233 * (mb + 1.0) + ph) * 43758.5453);
+        nsum = nsum + amp * mix(mix(h00, h10, ea), mix(h01, h11, ea), eb);
+      }
+      // Wake foam density: the turbulence, scaled by the noise between 0.55 and
+      // 1.45 and clamped to 0..1. Streaks and patches thin the foam without ever
+      // cutting it: there is no threshold, so the surface can show lace and fade
+      // the edges over a wide band.
+      let nn = clamp((nsum - 0.25) / 0.5, 0.0, 1.0);
+      wf = clamp(foam.wakeGain * turb * (0.55 + 0.9 * nn), 0.0, 1.0);
+    }
+  }
+  foamOut[i] = f;
+  textureStore(foamTex, vec2u(i % w, i / w), vec4(f, jac, wf, 1.0));
+}

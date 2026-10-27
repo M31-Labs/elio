@@ -56,6 +56,7 @@ func (ev *evaluator) execStmt(s ir.Stmt) (flow, error) {
 			if v, err = binop(x.Op, cur, v); err != nil {
 				return flowNormal, err
 			}
+			v = ev.round(v)
 		}
 		if err := ev.assign(x.Target, v); err != nil {
 			return flowNormal, err
@@ -140,6 +141,9 @@ func (ev *evaluator) execStmt(s ir.Stmt) (flow, error) {
 }
 
 func (ev *evaluator) assign(target ir.Expr, v any) error {
+	if f, ok := v.(float64); ok && ev.f32 {
+		v = float64(float32(f)) // a stored scalar is an f32 value
+	}
 	switch t := target.(type) {
 	case ir.Name:
 		ev.locals[t.Name] = v

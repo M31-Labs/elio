@@ -39,12 +39,24 @@ type Atomic struct{ Elem Scalar }
 // Named refers to a declared Struct by name.
 type Named struct{ Name string }
 
-func (Scalar) isType() {}
-func (Vec) isType()    {}
-func (Mat) isType()    {}
-func (Array) isType()  {}
-func (Atomic) isType() {}
-func (Named) isType()  {}
+// StorageTexture is a 2D write-only storage texture with a fixed texel format.
+// Format is "rgba16float", "rgba32float" or "r32float".
+type StorageTexture struct{ Format string }
+
+// Texture2D is a 2D sampled texture read without a sampler: texture_2d<f32> in
+// WGSL. A binding of this type uses Space Storage and Access Read. Only
+// textureLoad(t, coord, level) and textureDimensions(t, level) may touch it. Its
+// texel format is the host's choice; every load returns a vec4<f32>.
+type Texture2D struct{}
+
+func (Scalar) isType()         {}
+func (Vec) isType()            {}
+func (Mat) isType()            {}
+func (Array) isType()          {}
+func (Atomic) isType()         {}
+func (Named) isType()          {}
+func (StorageTexture) isType() {}
+func (Texture2D) isType()      {}
 
 // Canonical scalars.
 var (
@@ -80,6 +92,8 @@ type Access string
 const (
 	Read      Access = "read"
 	ReadWrite Access = "read_write"
+	// Write is only valid with a StorageTexture binding.
+	Write Access = "write"
 )
 
 // Binding is a module-level resource (var<...>): a uniform block or storage

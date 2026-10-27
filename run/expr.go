@@ -15,7 +15,7 @@ func (ev *evaluator) eval(e ir.Expr) (any, error) {
 		}
 		return v, nil
 	case ir.Lit:
-		return litValue(x.Text), nil
+		return ev.round(litValue(x.Text)), nil
 	case ir.Unary:
 		v, err := ev.eval(x.E)
 		if err != nil {
@@ -37,7 +37,11 @@ func (ev *evaluator) eval(e ir.Expr) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return binop(x.Op, l, r)
+		out, err := binop(x.Op, l, r)
+		if err != nil {
+			return nil, err
+		}
+		return ev.round(out), nil
 	case ir.Call:
 		return ev.call(x)
 	case ir.Index:
@@ -93,7 +97,7 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		for i := range va {
 			sum += va[i] * vb[i]
 		}
-		return sum, nil
+		return ev.round(sum), nil
 	case "atomicAdd":
 		ref, err := ev.eval(c.Args[0])
 		if err != nil {
@@ -110,6 +114,25 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		old := sr.arr[sr.idx]
 		sr.arr[sr.idx] = old + toFloat(add)
 		return old, nil
+	case "textureStore":
+		return ev.textureStore(c)
+	case "textureDimensions":
+		tex, err := ev.texture(c.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		if len(c.Args) == 2 {
+			lv, err := ev.eval(c.Args[1])
+			if err != nil {
+				return nil, err
+			}
+			if tex = tex.level(int(toFloat(lv))); tex == nil {
+				return []float64{0, 0}, nil
+			}
+		}
+		return []float64{float64(tex.Width), float64(tex.Height)}, nil
+	case "textureLoad":
+		return ev.textureLoad(c)
 	case "min", "max":
 		a, err := ev.eval(c.Args[0])
 		if err != nil {
@@ -143,7 +166,10 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		return falseVal, nil
 	}
 	if v, handled, err := ev.mathBuiltin(c); handled {
-		return v, err
+		if err != nil {
+			return nil, err
+		}
+		return ev.round(v), nil
 	}
 	if n, _, ok := ir.VecConstructor(c.Func); ok {
 		return ev.vecConstruct(n, c.Args)
@@ -158,7 +184,7 @@ func (ev *evaluator) call(c ir.Call) (any, error) {
 		case "i32", "u32":
 			return int64(f), nil // truncate toward zero, matching GPU int conversion
 		}
-		return f, nil
+		return ev.round(f), nil
 	}
 	return nil, fmt.Errorf("run: unsupported call %q", c.Func)
 }
@@ -215,4 +241,84 @@ func (ev *evaluator) addrOf(e ir.Expr) (any, error) {
 		return nil, fmt.Errorf("run: &index on non-atomic array %T", base)
 	}
 	return nil, fmt.Errorf("run: unsupported address-of %T", e)
+}
+
+func (ev *evaluator) texture(e ir.Expr) (*Texture, error) {
+	v, err := ev.eval(e)
+	if err != nil {
+		return nil, err
+	}
+	tex, ok := v.(*Texture)
+	if !ok {
+		return nil, fmt.Errorf("run: expected a *run.Texture, got %T", v)
+	}
+	return tex, nil
+}
+
+func (ev *evaluator) textureStore(c ir.Call) (any, error) {
+	if len(c.Args) != 3 {
+		return nil, fmt.Errorf("run: textureStore expects 3 arguments, got %d", len(c.Args))
+	}
+	tex, err := ev.texture(c.Args[0])
+	if err != nil {
+		return nil, err
+	}
+	coord, err := ev.eval(c.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	val, err := ev.eval(c.Args[2])
+	if err != nil {
+		return nil, err
+	}
+	x, y, err := texCoord("textureStore", coord)
+	if err != nil {
+		return nil, err
+	}
+	return nil, tex.store(x, y, toVec(val))
+}
+
+func texCoord(fn string, coord any) (x, y int, err error) {
+	switch cv := coord.(type) {
+	case []float64:
+		if len(cv) != 2 {
+			return 0, 0, fmt.Errorf("run: %s coordinate needs 2 components, got %d", fn, len(cv))
+		}
+		return int(cv[0]), int(cv[1]), nil
+	case []int64:
+		if len(cv) < 2 {
+			return 0, 0, fmt.Errorf("run: %s coordinate needs 2 components, got %d", fn, len(cv))
+		}
+		return int(cv[0]), int(cv[1]), nil
+	}
+	return 0, 0, fmt.Errorf("run: %s coordinate must be a vec2, got %T", fn, coord)
+}
+
+// textureLoad is textureLoad(t, coord, level): one texel of a sampled texture's
+// mip level, or zeros when the texel or level does not exist.
+func (ev *evaluator) textureLoad(c ir.Call) (any, error) {
+	if len(c.Args) != 3 {
+		return nil, fmt.Errorf("run: textureLoad expects 3 arguments, got %d", len(c.Args))
+	}
+	tex, err := ev.texture(c.Args[0])
+	if err != nil {
+		return nil, err
+	}
+	coord, err := ev.eval(c.Args[1])
+	if err != nil {
+		return nil, err
+	}
+	lv, err := ev.eval(c.Args[2])
+	if err != nil {
+		return nil, err
+	}
+	x, y, err := texCoord("textureLoad", coord)
+	if err != nil {
+		return nil, err
+	}
+	lt := tex.level(int(toFloat(lv)))
+	if lt == nil {
+		return []float64{0, 0, 0, 0}, nil
+	}
+	return lt.load(x, y), nil
 }
