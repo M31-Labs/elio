@@ -45,6 +45,8 @@ elio emit glsl  kernel.elio    # GLSL #version 450 compute
 elio emit metal kernel.elio    # Metal MSL
 elio check      kernel.elio    # parse-check only
 elio emit ts --set ocean       # TypeScript module of the ocean kernels
+elio emit ts --set ocean --global NAME      # the same as a classic script that assigns window.NAME
+elio emit ts --set ocean --backend webgpu   # only the WebGPU shaders and graphs (or webgl2)
 ```
 
 ## The `.elio` language
@@ -230,11 +232,37 @@ stdout. For each kernel it exports `<name>WGSL`, `<name>Entry`,
 `<name>Workgroup`, `<name>Bindings` and `<name>Uniforms` (field names, types,
 byte offsets and struct size under WGSL layout rules). A gather kernel also
 exports `<name>GLSL` and `<name>GatherLayout`, plus `<name>UniformsStd140` when
-the std140 layout differs from the WGSL one. The header records the Elio
-version and a SHA-256 of the sources, so a checked-in copy shows when it is
-stale. The library entry point is `emit/ts.Emit`; `stdlib.OceanKernelSet`
-lists the kernels. The emitted WGSL passes `naga` and the GLSL passes
-`glslangValidator`; neither has been run in a browser.
+the std140 layout differs from the WGSL one. The module also exports `graphs`,
+the set's pass graphs (see below).
+
+With `--global NAME` the output is a classic script instead. It assigns one
+frozen object to `window.NAME` with the fields `elio` (the version), `set`,
+`sha256`, `kernels` and `graphs`. Each entry in `kernels`, keyed by the
+camelCase kernel name, has `wgsl`, `entry`, `workgroup`, `bindings` and
+`uniforms`, and a gather kernel also has `glsl` and `gatherLayout`. With
+`--backend webgpu` or `--backend webgl2` the output holds only that backend's
+shaders and graphs: WGSL and WebGPU graphs, or GLSL and WebGL2 graphs.
+
+The header records the Elio version and a SHA-256 of the shader sources and
+graphs, so a checked-in copy shows when it is stale. The version string is not
+part of the hash. The library entry point is `emit/ts.Emit`;
+`kernelsets.OceanWithGraphs` supplies the ocean set. The emitted WGSL passes
+`naga` and the GLSL passes `glslangValidator`; neither has been run in a
+browser.
+
+**Pass graphs.** `graph` describes a GPU pass graph: the resources, passes,
+parameters and exports an effect needs, for one backend (`webgpu` or `webgl2`)
+and one quality tier (`high`, `medium` or `low`). A host runner can execute any
+valid graph, so an effect needs named parameter values and no host code of its
+own. `graph.Builder` checks a graph with `graph.Validate` before it returns it,
+and `emit/ts` validates each graph against its set's kernels. A parameter takes
+its value from the app, from the frame (`time`, `dt` and the camera position),
+from an expression over earlier parameters, from the accumulation or change of
+another parameter, or from a pose field of a scene node.
+`kernelsets.OceanWithGraphs` pairs the ocean kernels with six graphs, keyed
+`webgpu/high`, `webgpu/medium`, `webgpu/low` and the same three for `webgl2`. A
+tier graph may name another graph of its backend in `paramsFrom` and take its
+parameters from there. Elio emits and validates graphs; it does not run them.
 
 ## Layout
 
@@ -245,6 +273,9 @@ lists the kernels. The emitted WGSL passes `naga` and the GLSL passes
 | `emit/wgsl/`, `emit/glsl/`, `emit/metal/` | backend emitters |
 | `emit/gather/` | GLSL ES 3.00 fragment emitter for gather kernels (WebGL2) |
 | `emit/ts/` | TypeScript module emitter for kernel sets |
+| `graph/` | GPU pass graphs: types, builder and validation |
+| `kernelsets/` | the kernel sets a host loads as one module (the ocean set and its graphs) |
+| `stdlib/` | library kernels: culling, skinning, particles, FFT, ocean and wake |
 | `run/` | scalar CPU interpreter |
 | `conformance/` | cross-backend validation (naga + glslang + CPU) |
 | `cmd/elio/` | the `elio` CLI |
