@@ -105,4 +105,3 @@ func TestOceanProbeFarOriginFloat32(t *testing.T) {
 		t.Errorf("near-origin float32 height error %.3g m is too large to be a meaningful baseline", nh)
 	}
 }
-
