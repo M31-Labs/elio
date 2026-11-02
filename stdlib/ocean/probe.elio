@@ -6,7 +6,9 @@
 //   disp0..disp3: the four cascades' post-FFT A buffers (cascade count in
 //   probe.cascades, at most 4; unused bindings may hold any buffer and are never
 //   read). Each is n * n vec4 in natural order (index z * n + x), where texel
-//   (x, z) sits at world offset (x, z) * tile / n and the tile repeats. The
+//   (x, z) is centred at world offset (x + 0.5, z + 0.5) * tile / n and the
+//   tile repeats (the texel-centre convention of the sampler that draws the
+//   same field). The
 //   contents are what the inverse FFT leaves in buffer A after ocean_evolve,
 //   NOT scaled by choppiness: (Dy, Dx, Dz, dDy/dx) in metres (the same buffer
 //   fieldA that ocean_assemble reads; the fourth lane is unused here). This
@@ -126,12 +128,16 @@ struct OceanProbeParams {
         // the cascade's wrapped origin offset.
         let u = (px + ox) / lc;
         let v = (pz + oz) / lc;
-        let fxs = (u - floor(u)) * f32(nc);
-        let fzs = (v - floor(v)) * f32(nc);
+        // Texel (i, j) sits at the texel centre, world offset ((i + 0.5), (j + 0.5))
+        // * tile / n, the way a hardware sampler with repeat wrapping places it.
+        // So the sample position in texels is frac(u) * n - 0.5, and the lower
+        // texel can be -1, which wraps to n - 1.
+        let fxs = (u - floor(u)) * f32(nc) - 0.5;
+        let fzs = (v - floor(v)) * f32(nc) - 0.5;
         let fxf = floor(fxs);
         let fzf = floor(fzs);
-        let x0 = min(u32(fxf), nc - 1u);
-        let z0 = min(u32(fzf), nc - 1u);
+        let x0 = u32(fxf + f32(nc)) % nc;
+        let z0 = u32(fzf + f32(nc)) % nc;
         let rx = fxs - fxf;
         let rz = fzs - fzf;
         let x1 = (x0 + 1u) % nc;

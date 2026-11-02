@@ -24,16 +24,13 @@ type probeCascade struct {
 // Dz with respect to world x and z at (px, pz): the piecewise-bilinear field and
 // its exact cell gradient, as the kernel computes them.
 func (c probeCascade) bilinear(px, pz float64) (d [3]float64, dx, dz [3]float64) {
+	// Texel (i, j) sits at world offset ((i+0.5), (j+0.5)) * tile / n, as the
+	// hardware sampler places it: the sample position in texels is u*n - 0.5.
 	u, v := px/c.tile, pz/c.tile
-	fx, fz := (u-math.Floor(u))*float64(c.n), (v-math.Floor(v))*float64(c.n)
-	x0, z0 := int(math.Floor(fx)), int(math.Floor(fz))
-	if x0 > c.n-1 {
-		x0 = c.n - 1
-	}
-	if z0 > c.n-1 {
-		z0 = c.n - 1
-	}
-	rx, rz := fx-math.Floor(fx), fz-math.Floor(fz)
+	fx, fz := (u-math.Floor(u))*float64(c.n)-0.5, (v-math.Floor(v))*float64(c.n)-0.5
+	ix, iz := math.Floor(fx), math.Floor(fz)
+	rx, rz := fx-ix, fz-iz
+	x0, z0 := (int(ix)+c.n)%c.n, (int(iz)+c.n)%c.n
 	x1, z1 := (x0+1)%c.n, (z0+1)%c.n
 	h := c.tile / float64(c.n)
 	for k := 0; k < 3; k++ {
@@ -44,6 +41,25 @@ func (c probeCascade) bilinear(px, pz float64) (d [3]float64, dx, dz [3]float64)
 		dz[k] = ((1-rx)*(v01-v00) + rx*(v11-v10)) / h
 	}
 	return
+}
+
+// sampleRepeat emulates textureSample on an n x n texture with a repeat
+// address mode, a linear filter and level zero (WebGPU spec: texel centres at
+// (i+0.5)/n, the sample position is u*n-0.5, each of the four texels wraps by
+// its own integer index). It is written apart from bilinear, from the
+// unwrapped coordinate, so the two cross-check each other. It returns the
+// first three lanes (Dx, Dy, Dz) of the lambda-scaled field.
+func (c probeCascade) sampleRepeat(u, v float64) [3]float64 {
+	wrap := func(i int) int { return ((i % c.n) + c.n) % c.n }
+	x, z := u*float64(c.n)-0.5, v*float64(c.n)-0.5
+	i0, j0 := int(math.Floor(x)), int(math.Floor(z))
+	wx, wz := x-float64(i0), z-float64(j0)
+	var r [3]float64
+	for k := 0; k < 3; k++ {
+		t := func(i, j int) float64 { return c.d[wrap(j)*c.n+wrap(i)][k] }
+		r[k] = (1-wz)*((1-wx)*t(i0, j0)+wx*t(i0+1, j0)) + wz*((1-wx)*t(i0, j0+1)+wx*t(i0+1, j0+1))
+	}
+	return r
 }
 
 // probeSum sums every cascade at (px, pz).
@@ -270,4 +286,114 @@ func TestOceanProbeAppliesLambda(t *testing.T) {
 			t.Errorf("lambda %g, point %d: got (%g, %g, %g), want %v", lambda, i, g[0], g[1], g[2], want)
 		}
 	}
+}
+
+// samplerSurface returns the surface the ocean shader draws for the rest
+// position (px, pz), both absolute world metres: the cascades sampled like the
+// hardware sampler, summed, the horizontal displacement added to the position.
+// It returns the drawn world position (x, z), the height, and the Jacobian
+// determinant of the horizontal map (1 + dDx/dx)(1 + dDz/dz) - (dDx/dz)(dDz/dx).
+func samplerSurface(cs []probeCascade, px, pz float64) (qx, qz, h, det float64) {
+	var d [3]float64
+	for _, c := range cs {
+		s := c.sampleRepeat(px/c.tile, pz/c.tile)
+		for k := range d {
+			d[k] += s[k]
+		}
+	}
+	_, dx, dz := probeSum(cs, px, pz)
+	det = (1 + dx[0]) * (1 + dz[2]) - dz[0]*dx[2]
+	return px + d[0], pz + d[2], d[1], det
+}
+
+// TestProbeReferenceSamplesLikeHardware checks that the reference's bilinear
+// fetch is the sampler's, including at the tile seam and at texel centres.
+func TestProbeReferenceSamplesLikeHardware(t *testing.T) {
+	cs := oceanProbeCascades(t, 16, 1.5, 0.6)
+	r := rand.New(rand.NewSource(7))
+	pos := []float64{0, 1, -1, 0.5 / 16, 1 - 0.5/16, 1.0 / 16, 0.999999, -0.000001}
+	for i := 0; i < 200; i++ {
+		pos = append(pos, r.Float64()*6-3)
+	}
+	for _, c := range cs {
+		for _, u := range pos {
+			for _, v := range pos[:12] {
+				got, _, _ := c.bilinear(u*c.tile, v*c.tile)
+				want := c.sampleRepeat(u, v)
+				for k := 0; k < 3; k++ {
+					if math.Abs(got[k]-want[k]) > 1e-9 {
+						t.Fatalf("tile %g at (%g, %g) lane %d: bilinear %g, sampler %g", c.tile, u, v, k, got[k], want[k])
+					}
+				}
+			}
+		}
+		// A texel centre returns the texel itself.
+		i, j := 5, 11
+		got := c.sampleRepeat((float64(i)+0.5)/float64(c.n), (float64(j)+0.5)/float64(c.n))
+		if got[1] != c.d[j*c.n+i][1] {
+			t.Errorf("texel centre (%d, %d): %g, want %g", i, j, got[1], c.d[j*c.n+i][1])
+		}
+	}
+}
+
+// TestOceanProbeMatchesDrawnSurface compares the kernel with the surface the
+// shader draws. For rest positions P it forms the drawn point q = P + D_h(P)
+// and height Dy(P) with a sampler emulation (texel centres, repeat, bilinear,
+// every cascade, the same lambda), then asks the kernel for the height at q. The
+// probe points are relative to an origin O, with the per-cascade offsets
+// mod(O, tile) as the host passes them; the cases cover O = 0, a far origin, and
+// rest positions on and next to tile seams and texel centres.
+func TestOceanProbeMatchesDrawnSurface(t *testing.T) {
+	const n, lambda, tm, step = 64, 0.6, 2.5, 0.25
+	cs := oceanProbeCascades(t, n, tm, lambda)
+	origins := [][2]float64{{0, 0}, {1234.5, -987.25}, {-40001.75, 30000.5}}
+	r := rand.New(rand.NewSource(11))
+	var worstH float64
+	for _, o := range origins {
+		var rest [][2]float64
+		for i := 0; i < 48; i++ {
+			rest = append(rest, [2]float64{o[0] + r.Float64()*400 - 200, o[1] + r.Float64()*400 - 200})
+		}
+		// Rest positions on the seams of every tile and on texel centres.
+		for _, c := range cs {
+			cell := c.tile / float64(c.n)
+			base := math.Floor(o[0]/c.tile) * c.tile
+			rest = append(rest, [2]float64{base + c.tile, o[1] + 3}, [2]float64{base + c.tile - 1e-3, o[1] - 3},
+				[2]float64{o[0] + 2, math.Floor(o[1]/c.tile)*c.tile + c.tile}, [2]float64{base + 0.5*cell, o[1]},
+				[2]float64{base + c.tile - 0.5*cell, o[1] + 1})
+		}
+		var om, oz [4]float64
+		for c := range cs {
+			om[c] = math.Mod(math.Mod(o[0], cs[c].tile)+cs[c].tile, cs[c].tile)
+			oz[c] = math.Mod(math.Mod(o[1], cs[c].tile)+cs[c].tile, cs[c].tile)
+		}
+		var pts []any
+		var want []float64
+		for _, p := range rest {
+			qx, qz, h, det := samplerSurface(cs, p[0], p[1])
+			if det < 0.4 { // folded or nearly so: the inverse is not unique
+				continue
+			}
+			pts = append(pts, []float64{qx - o[0], qz - o[1], 0, 0})
+			want = append(want, h)
+		}
+		if len(pts) < 30 {
+			t.Fatalf("origin %v: only %d usable points", o, len(pts))
+		}
+		out := runOceanProbeWith(t, cs, lambda, tm, step, pts, om, oz, run.Options{})
+		var worst float64
+		for i := range pts {
+			if e := math.Abs(out[i].([]float64)[0] - want[i]); e > worst {
+				worst = e
+			}
+		}
+		t.Logf("origin %v: %d points, max |kernel - drawn surface| = %.3g m", o, len(pts), worst)
+		if worst > worstH {
+			worstH = worst
+		}
+		if worst > 2e-3 {
+			t.Errorf("origin %v: kernel differs from the drawn surface by up to %.3g m", o, worst)
+		}
+	}
+	t.Logf("worst height error against the sampler reference: %.3g m", worstH)
 }
