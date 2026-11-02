@@ -24,7 +24,7 @@ import (
 )
 
 // version names this Elio build in generated headers.
-const version = "v0.5.0"
+const version = "v0.6.0"
 
 const emitTSUsage = "usage: elio emit ts --set ocean [--global NAME] [--backend webgpu|webgl2]"
 
