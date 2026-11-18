@@ -8,4 +8,10 @@ This example assembles the three GPU-triad compilers around one GoSX frame owner
 
 The test is host-side and uses GoSX's headless GPU device. It proves the wiring and resource contracts without requiring a browser WebGPU device in CI. In a browser build, the same seam is `jsgpu.Device.NativeDevice()` passed to `eos/runtime/backends/webgpu.Backend.SetExternalDevice`.
 
-Elio and Selena are still local workspace modules, so this example currently relies on the repository-level local replaces. Once their vanity imports are live, the example can move to a public GoSX module without sibling checkouts.
+Run the example with `GOWORK=off go test ./examples/gosx_triad`. It uses the
+published module versions in `go.mod`. The Elio cull rejects one instance and
+publishes the other, including its pick ID. The Selena shader reads the four
+matrix columns at locations 4 through 7. Use the producer's 80-byte stride
+when binding that stream. The four columns occupy the first 64 bytes and
+GoSX keeps 16 bytes of picking metadata after them. The headless test checks
+the compacted bytes, indirect draw arguments and compiler binding layout.
