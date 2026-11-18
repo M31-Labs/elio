@@ -25,6 +25,7 @@ const cullUniformSize = 112 // 6×vec4 planes (96) + u32 + f32 + 8 pad
 // resources are the GPU buffers + bind group for one mesh's cull, grown lazily.
 type resources struct {
 	capacity    int
+	boundCount  int
 	cullUniform gpu.Buffer
 	inputBuf    gpu.Buffer
 	outputBuf   gpu.Buffer
@@ -83,11 +84,14 @@ func (p *Pass) Record(ctx compute.PassContext) error {
 	if p.count == 0 {
 		return nil
 	}
+	if p.count < 0 || p.count > len(p.instances)/compute.InstanceRecordStride {
+		return fmt.Errorf("elio/cull: %d live instances exceed the supplied %d bytes", p.count, len(p.instances))
+	}
 	if err := p.ensure(p.count); err != nil {
 		return err
 	}
 	q := ctx.Device.Queue()
-	q.WriteBuffer(p.res.inputBuf, 0, p.instances)
+	q.WriteBuffer(p.res.inputBuf, 0, p.instances[:p.count*compute.InstanceRecordStride])
 	q.WriteBuffer(p.res.cullUniform, 0, cullUniformBytes(p.planes, p.vertexCount, p.radius))
 	q.WriteBuffer(p.res.drawArgsBuf, 0, drawArgsResetBytes(p.vertexCount))
 
@@ -113,7 +117,7 @@ func (p *Pass) Record(ctx compute.PassContext) error {
 // ensure (re)creates buffers + bind group sized for at least count instances.
 func (p *Pass) ensure(count int) error {
 	if p.res != nil && p.res.capacity >= count {
-		return nil
+		return p.bindLiveRecords(p.res, count)
 	}
 	newCap := count + count/4
 	if newCap < 32 {
@@ -124,37 +128,75 @@ func (p *Pass) ensure(count int) error {
 	mk := func(label string, size int, usage gpu.BufferUsage) (gpu.Buffer, error) {
 		return p.dev.CreateBuffer(gpu.BufferDesc{Size: size, Usage: usage, Label: "elio.cull." + label + ":" + p.id})
 	}
-	inputBuf, err := mk("input", bytes, gpu.BufferUsageStorage|gpu.BufferUsageCopyDst)
+	next := &resources{capacity: newCap}
+	var err error
+	// A failed resize leaves the previous frame's resources usable.
+	defer func() {
+		if err != nil {
+			next.destroy()
+		}
+	}()
+	next.inputBuf, err = mk("input", bytes, gpu.BufferUsageStorage|gpu.BufferUsageCopyDst)
 	if err != nil {
 		return err
 	}
-	outputBuf, err := mk("output", bytes, gpu.BufferUsageStorage|gpu.BufferUsageVertex|gpu.BufferUsageCopyDst)
+	next.outputBuf, err = mk("output", bytes, gpu.BufferUsageStorage|gpu.BufferUsageVertex|gpu.BufferUsageCopyDst)
 	if err != nil {
 		return err
 	}
-	drawArgsBuf, err := mk("drawArgs", compute.IndirectArgsStride, gpu.BufferUsageStorage|gpu.BufferUsageIndirect|gpu.BufferUsageCopyDst)
+	next.drawArgsBuf, err = mk("drawArgs", compute.IndirectArgsStride, gpu.BufferUsageStorage|gpu.BufferUsageIndirect|gpu.BufferUsageCopyDst)
 	if err != nil {
 		return err
 	}
-	cullUniform, err := mk("uniform", cullUniformSize, gpu.BufferUsageUniform|gpu.BufferUsageCopyDst)
+	next.cullUniform, err = mk("uniform", cullUniformSize, gpu.BufferUsageUniform|gpu.BufferUsageCopyDst)
 	if err != nil {
 		return err
 	}
-	bg, err := p.dev.CreateBindGroup(gpu.BindGroupDesc{
+	if err = p.bindLiveRecords(next, count); err != nil {
+		return err
+	}
+	// A previously published output may still be referenced by an encoder.
+	p.res = next
+	return nil
+}
+
+func (p *Pass) bindLiveRecords(res *resources, count int) error {
+	if res.boundCount == count {
+		return nil
+	}
+	// arrayLength(&input) in the kernel sees the binding size. The buffers
+	// stay pooled while the bound range follows the live records each frame.
+	liveBytes := count * compute.InstanceRecordStride
+	group, err := p.dev.CreateBindGroup(gpu.BindGroupDesc{
 		Layout: p.bgLayout,
 		Entries: []gpu.BindGroupEntry{
-			{Binding: 0, Buffer: cullUniform, Size: cullUniformSize},
-			{Binding: 1, Buffer: inputBuf, Size: bytes},
-			{Binding: 2, Buffer: outputBuf, Size: bytes},
-			{Binding: 3, Buffer: drawArgsBuf, Size: compute.IndirectArgsStride},
+			{Binding: 0, Buffer: res.cullUniform, Size: cullUniformSize},
+			{Binding: 1, Buffer: res.inputBuf, Size: liveBytes},
+			{Binding: 2, Buffer: res.outputBuf, Size: liveBytes},
+			{Binding: 3, Buffer: res.drawArgsBuf, Size: compute.IndirectArgsStride},
 		},
 		Label: "elio.cull.bg:" + p.id,
 	})
 	if err != nil {
 		return err
 	}
-	p.res = &resources{capacity: newCap, cullUniform: cullUniform, inputBuf: inputBuf, outputBuf: outputBuf, drawArgsBuf: drawArgsBuf, bindGroup: bg}
+	if res.bindGroup != nil {
+		res.bindGroup.Destroy()
+	}
+	res.bindGroup = group
+	res.boundCount = count
 	return nil
+}
+
+func (r *resources) destroy() {
+	if r.bindGroup != nil {
+		r.bindGroup.Destroy()
+	}
+	for _, buf := range []gpu.Buffer{r.inputBuf, r.outputBuf, r.drawArgsBuf, r.cullUniform} {
+		if buf != nil {
+			buf.Destroy()
+		}
+	}
 }
 
 func cullUniformBytes(planes [6][4]float32, vertexCount uint32, radius float32) []byte {

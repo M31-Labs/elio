@@ -15,3 +15,10 @@ matrix columns at locations 4 through 7. Use the producer's 80-byte stride
 when binding that stream. The four columns occupy the first 64 bytes and
 GoSX keeps 16 bytes of picking metadata after them. The headless test checks
 the compacted bytes, indirect draw arguments and compiler binding layout.
+
+When pooling instance buffers, bind exactly the live record range to the
+compute kernel. Its WGSL guard reads `arrayLength(&input)`, which WebGPU
+calculates from the binding's byte length. Binding all 32 slots for two
+records can send 31 survivors to the indirect draw when only one passes the
+cull. The pass in `examples/cull` keeps the allocation and updates the range
+as the population changes.

@@ -87,8 +87,8 @@ func newElioCullPass(t *testing.T, dev *headless.Device) (*eliogosx.Pass, map[st
 		return b
 	}
 	mk("cull", 112, gpu.BufferUsageUniform|gpu.BufferUsageCopyDst)
-	mk("input", compute.InstanceRecordStride*4, gpu.BufferUsageStorage|gpu.BufferUsageCopyDst)
-	out := mk("output", compute.InstanceRecordStride*4, gpu.BufferUsageStorage|gpu.BufferUsageVertex|gpu.BufferUsageCopyDst)
+	mk("input", compute.InstanceRecordStride*2, gpu.BufferUsageStorage|gpu.BufferUsageCopyDst)
+	out := mk("output", compute.InstanceRecordStride*2, gpu.BufferUsageStorage|gpu.BufferUsageVertex|gpu.BufferUsageCopyDst)
 	args := mk("drawArgs", compute.IndirectArgsStride, gpu.BufferUsageStorage|gpu.BufferUsageIndirect|gpu.BufferUsageCopyDst)
 
 	pass, err := eliogosx.New(eliogosx.Config{
@@ -99,7 +99,7 @@ func newElioCullPass(t *testing.T, dev *headless.Device) (*eliogosx.Pass, map[st
 		Buffers: func(name string) (gpu.Buffer, bool) { b, ok := bufs[name]; return b, ok },
 		Groups:  func() (int, int, int) { return 1, 1, 1 },
 		Publish: []compute.GPUResource{
-			{Name: "triad.instances", Buffer: out, Role: compute.RoleInstanceAttr, Element: compute.InstanceRecordLayout(), Count: 4, Access: compute.Read},
+			{Name: "triad.instances", Buffer: out, Role: compute.RoleInstanceAttr, Element: compute.InstanceRecordLayout(), Count: 2, Access: compute.Read},
 			{Name: "triad.drawArgs", Buffer: args, Role: compute.RoleIndirectArgs, Element: compute.IndirectArgsLayout(), Count: 1, Access: compute.Read},
 		},
 	})
