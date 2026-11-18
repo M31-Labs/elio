@@ -18,5 +18,5 @@ require (
 
 require (
 	m31labs.dev/eos v0.2.0
-	m31labs.dev/selena v0.5.3-0.20261023001026-65ca73e1b8b1
+	m31labs.dev/selena v0.6.0
 )
